@@ -9,7 +9,7 @@ from kim_tools import query_crystal_genome_structures
 from kim_tools.test_driver import CrystalGenomeTestDriver
 from helper_functions import (check_lammps_log_for_wrong_structure_format, compute_alpha, compute_heat_capacity,
                                get_cell_from_averaged_lammps_dump, get_positions_from_averaged_lammps_dump,
-                               reduce_and_avg, run_lammps)
+                               reduce_and_avg, run_lammps,get_position_hists)
 
 
 class HeatCapacity(CrystalGenomeTestDriver):
@@ -101,7 +101,7 @@ class HeatCapacity(CrystalGenomeTestDriver):
             shutil.copyfile("accuracies_orthogonal.py", "accuracies.py")
         else:
             shutil.copyfile("accuracies_non_orthogonal.py", "accuracies.py")
-
+        
         # Run Lammps simulations in parallel.
         futures = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -109,7 +109,7 @@ class HeatCapacity(CrystalGenomeTestDriver):
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure, timestep,
                     number_sampling_timesteps, species))
-
+  
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
             assert future.done()
@@ -132,10 +132,14 @@ class HeatCapacity(CrystalGenomeTestDriver):
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))
             atoms_new.set_scaled_positions(
                 get_positions_from_averaged_lammps_dump(average_position_filename))
+            fstr = ".".join(os.path.basename(average_position_filename).split(".")[:-2])
+            get_position_hists(atoms_new,repeat,fstr,mode = "reduce")
+            get_position_hists(atoms_new,repeat,fstr,mode = "full")
             reduced_atoms = reduce_and_avg(atoms_new, repeat)
+            
             crystal_genome_designation = self._get_crystal_genome_designation_from_atoms_and_verify_unchanged_symmetry(
                 reduced_atoms, loose_triclinic_and_monoclinic=loose_triclinic_and_monoclinic)
-
+    
         c = compute_heat_capacity(temperatures, log_filenames, 2)
 
         alpha = compute_alpha(log_filenames, temperatures, crystal_genome_designation["prototype_label"])

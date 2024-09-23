@@ -326,6 +326,116 @@ def reduce_and_avg(atoms: Atoms, repeat: Tuple[int, int, int]) -> Atoms:
 
     return new_atoms
 
+def get_reduced_positions_from_atoms(atoms: Atoms, repeat: Tuple[int, int, int]) -> np.array:
+    """
+    Function to reduce all atoms to the original unit cell position.
+    (adapted from the reduce_and_avg() function)
+    return: the (natoms,3) numpy.arry for redueced positions 
+    """
+    new_atoms = atoms.copy()
+
+    cell = new_atoms.get_cell()
+
+    # Divide each unit vector by its number of repeats.
+    # See https://stackoverflow.com/questions/19602187/numpy-divide-each-row-by-a-vector-element.
+    cell = cell / np.array(repeat)[:, None]
+
+    # Decrease size of cell in the atoms object.
+    new_atoms.set_cell(cell)
+    new_atoms.set_pbc((True, True, True))
+
+    # Set averaging factor
+    M = np.prod(repeat)
+
+    # Wrap back the repeated atoms on top of the reference atoms in the original unit cell.
+    positions = new_atoms.get_positions(wrap=True)
+
+    number_atoms = len(new_atoms)
+    original_number_atoms = number_atoms // M
+    assert number_atoms == original_number_atoms * M
+    positions_in_prim_cell = np.zeros((number_atoms, 3))
+
+    for i in reversed(range(number_atoms)):
+        if i >= original_number_atoms:
+            # Get the distance to the reference atom in the original unit cell with the
+            # minimum image convention.
+            distance = new_atoms.get_distance(i % original_number_atoms, i,
+                                              mic=True, vector=True)
+            # Get the position that has the closest distance to the reference atom in the
+            # original unit cell.
+            position_i = positions[i % original_number_atoms] + distance
+        else:
+            # Atom was part of the original unit cell.
+            position_i = positions[i]
+        # update the position array
+        positions_in_prim_cell[i] = position_i 
+
+    return positions_in_prim_cell
+
+def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:str="average"):
+    '''
+    plot the histogram of the fractual coords for atoms
+    filter_str: files contains the fstr are of interest, 
+                e.g. fstr = "average_position_temperature_4.dump"
+    mode == "reduce": the histogram and the scatter plot for reduced atom positions (in file fstr.full)
+                        are plotted, number count = #atoms primitive cells * repeat[0]*repeat[1]*repeat[2]
+    mode == "reduce_and_average": the histogram and the scatter plot for reduced atom positions average
+                        over repeated cells(in file fstr.full) are plotted, number count = #atoms primitive cells
+    mode == "full":    the histogram for atom postitions of all the lammps dumps(filter_str.* except fstr.full)
+                        are plotted, number count = #dump files*#atoms primitive cells * repeat[0]*repeat[1]*repeat[2]
+    '''
+    pattern = fstr + r"\.dump\.\d+$"
+    if mode == "reduce":
+        _atoms = atoms.copy()
+        positions = get_reduced_positions_from_atoms(_atoms,repeat)
+        output_file = os.path.join("output",fstr+".dump.reduce")
+        plot_position_hist(positions,output_file+"_hist.png")
+        plot_position_scatter(positions,output_file+"_scatter.png")
+    elif mode == "reduce_and_average":
+        _atoms = atoms.copy()
+        reduced_atoms = reduce_and_avg(_atoms,repeat)
+        positions = reduced_atoms.get_positions(wrap=True)
+        output_file = os.path.join("output",fstr+".dump.reduce_average")
+        plot_position_hist(positions,output_file+"_hist.png")
+        plot_position_scatter(positions,output_file+"_scatter.png")
+    elif mode == "full":
+        filenames = [_ for _ in os.listdir('output') if re.match(pattern,_)]
+        _atoms = atoms.copy()
+        positions = []
+        for f in filenames:
+            _atoms.set_scaled_positions(get_positions_from_averaged_lammps_dump(os.path.join("output",f)))
+            positions.append(get_reduced_positions_from_atoms(_atoms,repeat))
+        positions = np.concatenate(positions)
+        output_file = os.path.join("output",fstr+".dump.full")
+        plot_position_hist(positions,output_file+"_hist.png")
+        plot_position_scatter(positions,output_file+"_scatter.png")
+
+
+def plot_position_hist(positions:np.array,filename:str,bins:int=-1,):
+    fig, axes = plt.subplots(nrows=1, ncols=3)
+    if bins < 0:
+        bins = 10 
+    axes[0].hist(positions[:,0],bins=bins)
+    axes[0].set_xlabel('u-coords')
+    axes[1].hist(positions[:,1],bins=bins)
+    axes[1].set_xlabel('v-coords')
+    axes[2].hist(positions[:,2],bins=bins)
+    axes[2].set_xlabel('w-coords')
+    fig.tight_layout()
+    fig.savefig(filename,dpi=160)
+    plt.close()
+
+def plot_position_scatter(position:np.array, filename:str):
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.scatter(position[:,0], position[:,1], position[:,2], marker='o',facecolors='none',edgecolors='blue')
+    ax.set_xlabel('u-coords')
+    ax.set_ylabel('v-coords')
+    ax.set_zlabel('w-coords')
+    fig.tight_layout()
+    fig.savefig(filename,dpi=160)
+    plt.close()
+
 
 def get_positions_from_averaged_lammps_dump(filename: str) -> List[Tuple[float, float, float]]:
     lines = sorted(np.loadtxt(filename, skiprows=9).tolist(), key=lambda x: x[0])
