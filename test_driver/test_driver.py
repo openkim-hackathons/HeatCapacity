@@ -134,7 +134,7 @@ class HeatCapacity(CrystalGenomeTestDriver):
                 get_positions_from_averaged_lammps_dump(average_position_filename))
             fstr = ".".join(os.path.basename(average_position_filename).split(".")[:-2])
             get_position_hists(atoms_new,repeat,fstr,mode = "reduce")
-            get_position_hists(atoms_new,repeat,fstr,mode = "full")
+            get_position_hists(atoms_new,repeat,fstr,mode = "reduce_and_average")
             reduced_atoms = reduce_and_avg(atoms_new, repeat)
             
             crystal_genome_designation = self._get_crystal_genome_designation_from_atoms_and_verify_unchanged_symmetry(

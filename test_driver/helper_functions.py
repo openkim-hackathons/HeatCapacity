@@ -370,9 +370,11 @@ def get_reduced_positions_from_atoms(atoms: Atoms, repeat: Tuple[int, int, int])
         # update the position array
         positions_in_prim_cell[i] = position_i 
 
-    return positions_in_prim_cell
+    new_atoms.set_positions(positions_in_prim_cell)
 
-def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:str="average"):
+    return new_atoms
+
+def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:str="reduce"):
     '''
     plot the histogram of the fractual coords for atoms
     filter_str: files contains the fstr are of interest, 
@@ -383,21 +385,23 @@ def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:st
                         over repeated cells(in file fstr.full) are plotted, number count = #atoms primitive cells
     mode == "full":    the histogram for atom postitions of all the lammps dumps(filter_str.* except fstr.full)
                         are plotted, number count = #dump files*#atoms primitive cells * repeat[0]*repeat[1]*repeat[2]
+                       *"full" option may include nonequlibrium configurations
     '''
     pattern = fstr + r"\.dump\.\d+$"
     if mode == "reduce":
         _atoms = atoms.copy()
-        positions = get_reduced_positions_from_atoms(_atoms,repeat)
+        reduced_atoms = get_reduced_positions_from_atoms(_atoms,repeat)
+        positions = reduced_atoms.get_positions(wrap=True)
         output_file = os.path.join("output",fstr+".dump.reduce")
         plot_position_hist(positions,output_file+"_hist.png")
-        plot_position_scatter(positions,output_file+"_scatter.png")
+        plot_position_scatter(positions,reduced_atoms.get_cell(),output_file+"_scatter.png",repeat=repeat)
     elif mode == "reduce_and_average":
         _atoms = atoms.copy()
         reduced_atoms = reduce_and_avg(_atoms,repeat)
         positions = reduced_atoms.get_positions(wrap=True)
         output_file = os.path.join("output",fstr+".dump.reduce_average")
         plot_position_hist(positions,output_file+"_hist.png")
-        plot_position_scatter(positions,output_file+"_scatter.png")
+        plot_position_scatter(positions,reduced_atoms.get_cell(),output_file+"_scatter.png")
     elif mode == "full":
         filenames = [_ for _ in os.listdir('output') if re.match(pattern,_)]
         _atoms = atoms.copy()
@@ -408,13 +412,13 @@ def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:st
         positions = np.concatenate(positions)
         output_file = os.path.join("output",fstr+".dump.full")
         plot_position_hist(positions,output_file+"_hist.png")
-        plot_position_scatter(positions,output_file+"_scatter.png")
+        plot_position_scatter(positions,reduced_atoms.get_cell(),output_file+"_scatter.png")
 
 
 def plot_position_hist(positions:np.array,filename:str,bins:int=-1,):
     fig, axes = plt.subplots(nrows=1, ncols=3)
     if bins < 0:
-        bins = 10 
+        bins = 100 
     axes[0].hist(positions[:,0],bins=bins)
     axes[0].set_xlabel('u-coords')
     axes[1].hist(positions[:,1],bins=bins)
@@ -425,15 +429,41 @@ def plot_position_hist(positions:np.array,filename:str,bins:int=-1,):
     fig.savefig(filename,dpi=160)
     plt.close()
 
-def plot_position_scatter(position:np.array, filename:str):
+def plot_position_scatter(position:np.array, cell:np.array, filename:str, **kwargs):
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
-    ax.scatter(position[:,0], position[:,1], position[:,2], marker='o',facecolors='none',edgecolors='blue')
+    ax.scatter(position[:,0], position[:,1], position[:,2], marker='o',facecolors='none',edgecolors='blue',s=40)
     ax.set_xlabel('u-coords')
     ax.set_ylabel('v-coords')
     ax.set_zlabel('w-coords')
+    # plot the prim cell
+    v = np.array([[0, 0, 0], cell[0],
+                  cell[1], cell[0]+cell[1],
+                  cell[2], cell[0]+cell[2],
+                  cell[1]+cell[2], cell[0]+cell[1]+cell[2]], dtype=np.float64)
+    e = [[0, 1], [0, 2], [0, 4],[1, 3], [1, 5],[2, 3], 
+         [2, 6],[3, 7],[4, 5], [4, 6],[5, 7],[6, 7]]
+    for a,b in e:
+        ax.plot([v[a,0],v[b,0]],[v[a,1],v[b,1]],[v[a,2],v[b,2]],color='black')
+    
+    if "repeat" in kwargs:
+        number_atoms = position.shape[0]
+        print("number of atoms = {}".format(number_atoms))
+        M = np.prod(kwargs["repeat"])
+        original_number_atoms = number_atoms//M
+        i = np.arange(original_number_atoms,number_atoms)
+        j = np.mod(i,original_number_atoms)
+        for p,q in zip(i.tolist(),j.tolist()):
+            ax.plot([position[p,0],position[q,0]],
+                    [position[p,1],position[q,1]],
+                    [position[p,2],position[q,2]],
+                    '--')
+        ax.scatter(position[:original_number_atoms,0], 
+                   position[:original_number_atoms,1], 
+                   position[:original_number_atoms,2], 
+                   marker='v',facecolors='red',edgecolors='red',s=80)
     fig.tight_layout()
-    fig.savefig(filename,dpi=160)
+    fig.savefig(filename,dpi=300)
     plt.close()
 
 
