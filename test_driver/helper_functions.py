@@ -12,6 +12,7 @@ from matplotlib.ticker import ScalarFormatter
 import numpy as np
 import numpy.typing as npt
 import scipy.optimize
+from ase.geometry import get_distances
 
 
 def run_lammps(modelname: str, temperature_index: int, temperature: float, pressure: float, timestep: float,
@@ -332,10 +333,9 @@ def get_reduced_positions_from_atoms(atoms: Atoms, repeat: Tuple[int, int, int])
     Function to reduce all atoms to the original unit cell position.
     (adapted from the reduce_and_avg() function)
     return: 0 atoms with redueced positions
-            1 distances(list of list) of between the atoms in the repeated cells and their correspoinding 
-              prim cell atoms
-              len(distance) = # of prim atoms
-              len(distance[i]) = # of atoms in the repeated cells that reduces to prim atom i
+            1 distances(list of list) of between the atoms and their corresponding centers
+              len(distance) = # of prim atoms(centers)
+              len(distance[i]) = # of atoms that reduce to center i
     """ 
     new_atoms = atoms.copy()
 
@@ -357,10 +357,9 @@ def get_reduced_positions_from_atoms(atoms: Atoms, repeat: Tuple[int, int, int])
 
     number_atoms = len(new_atoms)
     original_number_atoms = number_atoms // M
-    distances = [[] for _ in range(original_number_atoms)]
     assert number_atoms == original_number_atoms * M
     positions_in_prim_cell = np.zeros((number_atoms, 3))
-
+    avg_positions_in_prim_cell = np.zeros((original_number_atoms, 3))
     for i in reversed(range(number_atoms)):
         if i >= original_number_atoms:
             # Get the distance to the reference atom in the original unit cell with the
@@ -370,14 +369,21 @@ def get_reduced_positions_from_atoms(atoms: Atoms, repeat: Tuple[int, int, int])
             # Get the position that has the closest distance to the reference atom in the
             # original unit cell.
             position_i = positions[i % original_number_atoms] + distance 
-            distances[i % original_number_atoms].append(np.linalg.norm(distance))
         else:
             # Atom was part of the original unit cell.
             position_i = positions[i]
         # update the position array
-        positions_in_prim_cell[i] = position_i 
-
+        positions_in_prim_cell[i] = position_i
+        avg_positions_in_prim_cell[i % original_number_atoms] += position_i / M
     new_atoms.set_positions(positions_in_prim_cell)
+    # calculate the distances
+    distances = [[] for _ in range(original_number_atoms)]
+    for i in range(number_atoms):
+        _,dr = get_distances(positions_in_prim_cell[i],avg_positions_in_prim_cell[i % original_number_atoms]
+                      ,cell=new_atoms.get_cell(),pbc=True)
+        # dr is a distance matrix, here we only have one distance
+        distances[i % original_number_atoms].append(dr[0][0])
+    
     return new_atoms,distances
 
 def get_position_hists(atoms:Atoms,repeat:Tuple[int, int, int],fstr:str, mode:str="reduce"):
@@ -463,14 +469,14 @@ def plot_position_scatter(position:np.array, cell:np.array, filename:str, **kwar
 def plot_distance_hists(distances:list,filename:str,bins:int = -1):
     if bins < 0:
         bins = 20
-    N = len(distances)
+    N = len(distances) # number of centers
     # balance nrow and ncol to min|ncol-nrow| s.t. nrow*ncol = N
     nrow,ncol = next((i, N // i) for i in range(int(sqrt(N)), 0, -1) if N % i == 0)
     fig, axes = plt.subplots(nrows=nrow, ncols=ncol)
     for i in range(N):
         row,col = i // nrow, i % nrow
         axes[row,col].hist(distances[i],bins=bins)
-        axes[row,col].set_title("atom #{}".format(i))
+        axes[row,col].set_title("center #{}".format(i))
         axes[row,col].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         axes[row,col].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         
