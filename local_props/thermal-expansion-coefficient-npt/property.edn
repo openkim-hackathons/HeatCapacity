@@ -9,69 +9,37 @@
 ; CHANGE THE SECTION BELOW WHEN CREATING NEW PROPERTIES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-"alpha11" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      true
-  "description"   "the 11 component of the thermal expansion tensor."
-}
-
-"alpha22" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      false
-  "description"   "the 22 component of the thermal expansion tensor."
-}
-
-"alpha33" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      false
-  "description"   "the 33 component of the thermal expansion tensor."
-}
-
-"alpha12" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      false
-  "description"   "the 12 component of the thermal expansion tensor."
-}
-
-"alpha13" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      false
-  "description"   "the 13 component of the thermal expansion tensor."
-}
-
-"alpha23" {
-  "type"          "float"
-  "has-unit"      true
-  "extent"        []
-  "required"      false
-  "description"   "the 23 component of the thermal expansion tensor."
-}
-
-"thermal-expansion-tensor" {
+"thermal-expansion-tensor-voigt" {
     "type"         "float"
     "has-unit"     true
-    "extent"       [3,3]
+    "extent"       [6]
     "required"     true
-    "description" "Thermal expansion coefficient in rank-2 tensor form."
+    "description" "Thermal expansion coefficient tensor in voigt notation."
   }
 
-"thermal-expansion-tensor-symmetry-reduced" {
+"thermal-expansion-tensor-voigt-symmetry-reduced" {
     "type"         "float"
     "has-unit"     true
-    "extent"       [3,3]
+    "extent"       [6]
     "required"     true
-    "description" "Thermal expansion coefficient in rank-2 tensor form, reduced by constraints imposed by crystal symmetry such that only triclinic and monoclinic crystal structrues report off-diagonal components, orthorhombic structures report alpha11, alpha22, and alpha33, hexagona, trigonal, tetragonal structures enforce that alpha22 = alpha11, and cubic structures enforce that alpha11 = alpha22 = alpha33."
+    "description" "Thermal expansion coefficient tensor in voigt notation, reduced by constraints imposed by crystal symmetry such that only triclinic and monoclinic crystal structrues report off-diagonal components, orthorhombic structures report alpha11, alpha22, and alpha33, hexagona, trigonal, tetragonal structures enforce that alpha22 = alpha11, and cubic structures enforce that alpha11 = alpha22 = alpha33."
   }
+
+"unique-components-names" {
+  "type"           "string"
+  "has-unit"       false
+  "extent"         [":"]
+  "required"       true
+  "description"    "Names of the unique components of the thermal expansion tensor given its crystal structure."
+}
+
+"unique-components-values" {
+  "type"           "float"
+  "has-unit"       true
+  "extent"         [":"]
+  "required"       true
+  "description"    "Values of the unique components of the thermal expansion tensor given its crystal structure."
+}
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; END OF NEW FIELDS TO DEFINE
