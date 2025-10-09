@@ -204,8 +204,6 @@ class TestDriver(SingleCrystalTestDriver):
                 get_positions_from_averaged_lammps_dump(average_position_filename))
             reduced_atoms, reduced_distances = reduce_and_avg(atoms_new, repeat)
 
-            all_cells.append(reduced_atoms.get_cell())
-
             if t_index == number_symmetric_temperature_steps:
                 # Store the atoms of the middle temperature for later because their crystal genome designation 
                 # will be used for the heat-capacity and thermal expansion lrties.
@@ -229,6 +227,7 @@ class TestDriver(SingleCrystalTestDriver):
             
             # Write NPT crystal structures.
             self._update_nominal_parameter_values(reduced_atoms)
+            all_cells.append(self._get_atoms().cell)
             self._add_property_instance_and_common_crystal_genome_keys("crystal-structure-npt", write_stress=True,
                                                                        write_temp=t)
             self._add_file_to_current_property_instance("restart-file",
@@ -241,7 +240,7 @@ class TestDriver(SingleCrystalTestDriver):
         assert middle_temperature is not None
 
         c = compute_heat_capacity(temperatures, log_filenames, 2)
-        alpha = compute_alpha_tensor(original_atoms.get_cell(),all_cells,temperatures)
+        alpha = compute_alpha_tensor(all_cells,temperatures)
 
         # Print result.
         print('####################################')

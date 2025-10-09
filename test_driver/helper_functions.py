@@ -389,8 +389,7 @@ def get_center_finite_difference_and_error(diff_x: float, y_values: List[float],
     finite_difference_error_squared /= (diff_x * diff_x)
     return finite_difference, sqrt(finite_difference_error_squared)
 
-def compute_alpha_tensor(old_cell: Atoms.cell,
-                         new_cells: list[Atoms.cell],
+def compute_alpha_tensor(new_cells: list[Atoms.cell],
                          temperatures:list[float]):
     
     dim = 3
@@ -401,7 +400,9 @@ def compute_alpha_tensor(old_cell: Atoms.cell,
     assert len(temperatures) >= 3
     max_accuracy = len(temperatures) - 1
 
-    old_cell_inverse = np.linalg.inv(old_cell)
+    center_cell = new_cells[int(np.floor(len(new_cells)/2))]
+
+    center_cell_inverse = np.linalg.inv(center_cell)
 
     strains=[]
 
@@ -411,7 +412,7 @@ def compute_alpha_tensor(old_cell: Atoms.cell,
         new_cell = new_cells[index]
 
         # calculate the deformation matrix from the old and new cells
-        deformation = (new_cell * old_cell_inverse) - np.identity(dim)
+        deformation = (new_cell * center_cell_inverse) - np.identity(dim)
 
         strain = np.empty((dim,dim))
 
