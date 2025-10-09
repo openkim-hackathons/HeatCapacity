@@ -7,7 +7,8 @@ from ase.io.lammpsdata import write_lammps_data
 from ase.calculators.lammps import convert, Prism
 import numpy as np
 from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
-from kim_tools.symmetry_util.core import reduce_and_avg, kstest_reduced_distances, PeriodExtensionException
+from kim_tools.symmetry_util.core import (reduce_and_avg, kstest_reduced_distances, 
+                                          PeriodExtensionException, fit_voigt_tensor_to_cell_and_space_group_symb, full_to_voigt_symb)
 from kim_tools.test_driver import SingleCrystalTestDriver
 from .helper_functions import (check_lammps_log_for_wrong_structure_format, compute_alpha_tensor, compute_heat_capacity,
                                get_cell_from_averaged_lammps_dump, get_positions_from_averaged_lammps_dump, run_lammps)
@@ -199,10 +200,11 @@ class TestDriver(SingleCrystalTestDriver):
                     if line.startswith("Crystal melted or vaporized"):
                         raise KIMTestDriverError(f"Crystal melted or vaporized during simulation at temperature {t} K.")
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))
-            all_cells.append(atoms_new.get_cell())
             atoms_new.set_scaled_positions(
                 get_positions_from_averaged_lammps_dump(average_position_filename))
             reduced_atoms, reduced_distances = reduce_and_avg(atoms_new, repeat)
+
+            all_cells.append(reduced_atoms.get_cell())
 
             if t_index == number_symmetric_temperature_steps:
                 # Store the atoms of the middle temperature for later because their crystal genome designation 
@@ -311,62 +313,60 @@ class TestDriver(SingleCrystalTestDriver):
                                       [alpha21_err, alpha22_err, alpha23_err],
                                       [alpha31_err, alpha32_err, alpha33_err]])
 
-        self._add_property_instance_and_common_crystal_genome_keys("thermal-expansion-coefficient-npt",
+        self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
                                                                    write_stress=True, write_temp=True)
         space_group = int(self.prototype_label.split("_")[2])
-        # alpha11 defined for all space groups
-        self._add_key_to_current_property_instance("alpha11", alpha11, "1/K",
-                                                   uncertainty_info={"source-std-uncert-value": alpha11_err})
 
-        alpha_symmetry_reduced = np.asarray([[alpha11, 0.0, 0.0],
-                                             [0.0, alpha11, 0.0],
-                                             [0.0, 0.0, alpha11]])
+        # thermal expansion tensor in voigt notation
+        alpha_final_voigt = full_to_voigt_symb(alpha_final)
 
-        alpha_symmetry_reduced_err = np.asarray([[alpha11_err, 0.0, 0.0],
-                                                 [0.0, alpha11_err, 0.0],
-                                                 [0.0, 0.0, alpha11_err]])
+        # TODO: upgrade to fit_voigt_tensor_and_error_to_cell_and_space_group()
+        # once errors are being calculated
+        alpha_final_voigt_sym = fit_voigt_tensor_to_cell_and_space_group_symb(alpha_final_voigt,
+                                                                               middle_temperature_atoms.get_cell(),
+                                                                               space_group)
+        
+        alpha_final_voigt_sym = alpha_final_voigt
+        # alpha11 unique for all space groups
+        unique_components_names = ["alpha11"]
+        unique_components_values = [alpha11]
+        unique_components_errs = [alpha11_err]
 
-        # hexagona, trigonal, tetragonal space groups also compute alpha33
+        # hexagona, trigonal, tetragonal space groups alpha33 also unique
         if space_group <= 194:
-            self._add_key_to_current_property_instance("alpha33", alpha33, "1/K",
-                                                       uncertainty_info={"source-std-uncert-value": alpha33_err})
 
-            alpha_symmetry_reduced = np.asarray([[alpha11, 0.0, 0.0],
-                                                 [0.0, alpha11, 0.0],
-                                                 [0.0, 0.0, alpha33]])
+            unique_components_names.append("alpha33")
+            unique_components_values.append(alpha33)
+            unique_components_errs.append(alpha33_err)
 
-            alpha_symmetry_reduced_err = np.asarray([[alpha11_err, 0.0, 0.0],
-                                                     [0.0, alpha11_err, 0.0],
-                                                     [0.0, 0.0, alpha33_err]])
-
-        # orthorhombic, also compute alpha22
+        # orthorhombic, alpha22 also unique
         if space_group <= 74:
-            self._add_key_to_current_property_instance("alpha22", alpha22, "1/K",
-                                                       uncertainty_info={"source-std-uncert-value": alpha22_err})
 
-            alpha_symmetry_reduced = np.asarray([[alpha11, 0.0, 0.0],
-                                                 [0.0, alpha22, 0.0],
-                                                 [0.0, 0.0, alpha33]])
+            # insert alpha22 in the middle so they end up sorted
+            # into voigt notation order
+            unique_components_names.insert(1,"alpha22")
+            unique_components_values.insert(1,alpha22)
+            unique_components_errs.insert(1,alpha22_err)
 
-            alpha_symmetry_reduced_err = np.asarray([[alpha11_err, 0.0, 0.0],
-                                                     [0.0, alpha22_err, 0.0],
-                                                     [0.0, 0.0, alpha33_err]])
-
-        # monoclinic or triclinic, compute all components
+        # monoclinic or triclinic, all components potentially unique
         if space_group <= 15:
-            self._add_key_to_current_property_instance("alpha12", alpha12, "1/K",
-                                                       uncertainty_info={"source-std-uncert-value": alpha12_err})
-            self._add_key_to_current_property_instance("alpha13", alpha13, "1/K",
-                                                       uncertainty_info={"source-std-uncert-value": alpha13_err})
-            self._add_key_to_current_property_instance("alpha23", alpha23, "1/K",
-                                                       uncertainty_info={"source-std-uncert-value": alpha23_err})
 
-            alpha_symmetry_reduced = alpha_final
-            alpha_symmetry_reduced_err = alpha_final_err
-        print(alpha_final)
-        print(alpha_final_err)
-        self._add_key_to_current_property_instance("thermal-expansion-tensor", alpha_final, "1/K",
-                                                   uncertainty_info={"source-std-uncert-value": alpha_final_err})
-        self._add_key_to_current_property_instance("thermal-expansion-tensor-symmetry-reduced", alpha_symmetry_reduced,
-                                                   "1/K", uncertainty_info={
-                "source-std-uncert-value": alpha_symmetry_reduced_err})
+            unique_components_names.append("alpha23")
+            unique_components_names.append("alpha13")
+            unique_components_names.append("alpha12")
+
+            unique_components_values.append(alpha23)
+            unique_components_values.append(alpha13)
+            unique_components_values.append(alpha12)
+
+            unique_components_errs.append(alpha23_err)
+            unique_components_errs.append(alpha13_err)
+            unique_components_errs.append(alpha12_err)
+
+        print(alpha_final_voigt)
+        # print(alpha_final_voigt_err)
+        # TODO: add unvertianty info once we decide how to calculate cell errors
+        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt, "1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt-symmetry-reduced", alpha_final_voigt_sym,"1/K")
+        self._add_key_to_current_property_instance("unique-components-names",unique_components_names)
+        self._add_key_to_current_property_instance("unique-components-values",unique_components_values,"1/K")
