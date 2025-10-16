@@ -73,6 +73,12 @@ class TestDriver(SingleCrystalTestDriver):
         # Get pressure from cauchy stress tensor.
         pressure_bar = -cell_cauchy_stress_bar[0]
 
+         # Copy original atoms so that their information does not get lost.
+        original_atoms = self._get_atoms()
+
+        # Create atoms object that will contain the supercell.
+        atoms_new = self._get_atoms()
+
         # This is how ASE obtains the species that are written to the initial configuration.
         # These species are passed to kim interactions.
         # See https://wiki.fysik.dtu.dk/ase/_modules/ase/io/lammpsdata.html#write_lammps_data
