@@ -412,7 +412,7 @@ def compute_alpha_tensor(new_cells: list[Atoms.cell],
         new_cell = new_cells[index]
 
         # calculate the deformation matrix from the old and new cells
-        deformation = (new_cell * center_cell_inverse) - np.identity(dim)
+        deformation = np.matmul(new_cell, center_cell_inverse) - np.identity(dim)
 
         strain = np.empty((dim,dim))
 
