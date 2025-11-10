@@ -1,0 +1,8 @@
+ase
+findiff
+kim-convergence
+kim-tools
+lammps
+matplotlib
+numpy
+scipy
