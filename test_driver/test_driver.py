@@ -1,5 +1,6 @@
 from concurrent.futures import as_completed, ProcessPoolExecutor
 import os
+import random
 import shutil
 from typing import Optional, Sequence
 from ase.calculators.lammps import convert, Prism
@@ -15,8 +16,8 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int, timestep: float,
                    number_sampling_timesteps: int = 100, repeat: Sequence[int] = (3, 3, 3),
-                   max_workers: Optional[int] = None, lammps_command = "lmp", 
-                   msd_threshold: float = 0.1, **kwargs) -> None:
+                   max_workers: Optional[int] = None, lammps_command = "lmp", msd_threshold: float = 0.1,
+                   random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
         """
         Compute constant-pressure heat capacity from centered finite difference (see Section 3.2 in
         https://pubs.acs.org/doi/10.1021/jp909762j).
@@ -67,6 +68,16 @@ class TestDriver(SingleCrystalTestDriver):
         
         if not msd_threshold > 0.0:
             raise RuntimeError("The mean-squared displacement threshold has to be bigger than zero.")
+
+        if random_seeds is not None:
+            if len(random_seeds) != 2 * number_symmetric_temperature_steps + 1:
+                raise RuntimeError("If random seeds are given, their number has to match the number of temperatures "
+                                   "being simulated.")
+            if not all(rs > 0 for rs in random_seeds):
+                raise RuntimeError("All random seeds must be bigger than zero.")
+        else:
+            # Get random 31-bit unsigned integers.
+            random_seeds = [random.getrandbits(31) for _ in range(2 * number_symmetric_temperature_steps + 1)]
 
         # Get pressure from cauchy stress tensor.
         pressure_bar = -cell_cauchy_stress_bar[0]
@@ -140,12 +151,13 @@ class TestDriver(SingleCrystalTestDriver):
         atoms_new.write(structure_file, format="lammps-data", masses=True, units="metal", atom_style=atom_style)
 
         # Run Lammps simulations in parallel.
+        assert len(temperatures) == len(random_seeds)
         futures = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            for i, t in enumerate(temperatures):
+            for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure_bar, timestep,
-                    number_sampling_timesteps, species, msd_threshold, lammps_command=lammps_command))
+                    number_sampling_timesteps, species, msd_threshold, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
