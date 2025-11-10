@@ -177,10 +177,10 @@ class TestDriver(SingleCrystalTestDriver):
         pressure_bar = -cell_cauchy_stress_bar[0]
 
          # Copy original atoms so that their information does not get lost.
-        original_atoms = self._get_atoms()  # TODO: DO I NEED THIS?
+        original_atoms = self._get_atoms()
 
         # Create atoms object that will contain the supercell.
-        atoms_new = self._get_atoms()
+        atoms_new = original_atoms.copy()
 
         # This is how ASE obtains the species that are written to the initial configuration.
         # These species are passed to kim interactions.
@@ -262,7 +262,6 @@ class TestDriver(SingleCrystalTestDriver):
 
         # Collect results and check that symmetry is unchanged after all simulations.
         log_filenames = []
-        restart_filenames = []
         all_cells = []
         middle_temperature_atoms = None
         middle_temperature = None
@@ -271,16 +270,17 @@ class TestDriver(SingleCrystalTestDriver):
             assert future.exception() is None
             log_filename, restart_filename, average_position_filename, average_cell_filename = future.result()
             log_filenames.append(log_filename)
-            restart_filenames.append(restart_filename)
-            restart_filenames.append(restart_filename)
+
+            # Check that crystal did not melt or vaporize.
             with open(log_filename, "r") as f:
                 for line in f:
                     if line.startswith("Crystal melted or vaporized"):
                         raise KIMTestDriverError(f"Crystal melted or vaporized during simulation at temperature {t} K.")
+
+            # Process results and check that symmetry is unchanged after simulation.
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))
             atoms_new.set_scaled_positions(
                 get_positions_from_averaged_lammps_dump(average_position_filename))
-
             try:
                 reduced_atoms = reduce_and_avg(atoms_new, repeat)
             except PeriodExtensionException as e:
@@ -303,11 +303,10 @@ class TestDriver(SingleCrystalTestDriver):
             
             # Write NPT crystal structures.
             self._update_nominal_parameter_values(reduced_atoms)
-            all_cells.append(self._get_atoms().cell)
+            all_cells.append(self._get_atoms().cell)  # TODO: THIS IS WRONG? It will always get the same cell.
             self._add_property_instance_and_common_crystal_genome_keys("crystal-structure-npt", write_stress=True,
                                                                        write_temp=t)
-            self._add_file_to_current_property_instance("restart-file",
-                                                        f"output/final_configuration_temperature_{t_index}.restart")
+            self._add_file_to_current_property_instance("restart-file", restart_filename)
             
             # Reset to original atoms.
             self._update_nominal_parameter_values(original_atoms)
@@ -316,7 +315,7 @@ class TestDriver(SingleCrystalTestDriver):
         assert middle_temperature is not None
 
         c = compute_heat_capacity(temperatures, log_filenames, 2)
-        alpha = compute_alpha_tensor(all_cells,temperatures)  # TODO: Check handling and passing arounds of cell?
+        alpha = compute_alpha_tensor(all_cells, temperatures)
 
         # Print result.
         print('####################################')
@@ -388,7 +387,7 @@ class TestDriver(SingleCrystalTestDriver):
                                       [alpha21_err, alpha22_err, alpha23_err],
                                       [alpha31_err, alpha32_err, alpha33_err]])
 
-        # TODO: IS THIS CORRECT?
+        # TODO: IS INCLUDING THE TAG:... CORRECT?
         self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
                                                                    write_stress=True, write_temp=True)
         space_group = int(self.prototype_label.split("_")[2])
