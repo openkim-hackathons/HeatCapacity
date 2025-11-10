@@ -617,7 +617,7 @@ def run_length_control(lmpptr, nevery: int, *argv) -> None:
     cmd = "variable run_var string ''"
     lmp.command(cmd)
 
-    lmp.set_variable('run_var', msg)
+    lmp.set_string_variable('run_var', msg)
 
     cmd = 'print "${run_var}"'
     lmp.command(cmd)
