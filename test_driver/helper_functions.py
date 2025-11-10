@@ -558,7 +558,18 @@ def get_center_finite_difference_and_error(diff_x: float, y_values: List[float],
 
 def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.ndarray:
     """
-    TODO: Document function.
+    Compute the thermal expansion tensor of a crystal given an array of unit cells
+    equilibrated at uniformly spaced temperatures.
+
+    Compute the deformation matrix between the center cell and other cells, 
+    and from that compute the strain matrix. The thermal expansion tensor is computed 
+    by computing the gradient of the strain as a function temperature.
+
+    :param new_cells: An array of Cell objects equilibrated at uniformly spaced temperatures, 
+        centered on a target temperature.
+    :type new_cells:list[ase.cell.Cell]
+    :param temperatures: List of temperatures that the cells were equilibrated at
+    :type temperatures: list[float]
     """
     dim = 3
 

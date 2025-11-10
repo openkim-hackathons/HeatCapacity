@@ -305,7 +305,10 @@ class TestDriver(SingleCrystalTestDriver):
             
             # Write NPT crystal structures.
             self._update_nominal_parameter_values(reduced_atoms)
-            all_cells.append(self._get_atoms().cell)  # TODO: THIS IS WRONG? It will always get the same cell.
+            # since we're looping over the futures, one per temperature
+            # calling this will append the current cell, one per temperature, 
+            # into an array for later use
+            all_cells.append(self._get_atoms().cell)
             self._add_property_instance_and_common_crystal_genome_keys("crystal-structure-npt", write_stress=True,
                                                                        write_temp=t)
             self._add_file_to_current_property_instance("restart-file", restart_filename)
@@ -389,7 +392,7 @@ class TestDriver(SingleCrystalTestDriver):
                                       [alpha21_err, alpha22_err, alpha23_err],
                                       [alpha31_err, alpha32_err, alpha33_err]])
 
-        # TODO: IS INCLUDING THE TAG:... CORRECT?
+        # property can be referred to with or without tags
         self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
                                                                    write_stress=True, write_temp=True)
         space_group = int(self.prototype_label.split("_")[2])
@@ -399,19 +402,20 @@ class TestDriver(SingleCrystalTestDriver):
 
         # TODO: upgrade to fit_voigt_tensor_and_error_to_cell_and_space_group()
         # once errors are being calculated
+        center_cell = all_cells[int(np.floor(len(all_cells)/2))]
         alpha_final_voigt_sym = fit_voigt_tensor_to_cell_and_space_group_symb(alpha_final_voigt,
-                                                                               middle_temperature_atoms.get_cell(),
+                                                                               center_cell,
                                                                                space_group)
         
         alpha_final_voigt_sym = alpha_final_voigt
         # alpha11 unique for all space groups
-        unique_components_names = ["alpha11"]
+        unique_components_names = ["alpha1"]
         unique_components_values = [alpha11]
         unique_components_errs = [alpha11_err]
 
         # hexagonal, trigonal, tetragonal space groups alpha33 also unique
         if space_group <= 194:
-            unique_components_names.append("alpha33")
+            unique_components_names.append("alpha3")
             unique_components_values.append(alpha33)
             unique_components_errs.append(alpha33_err)
 
@@ -420,16 +424,16 @@ class TestDriver(SingleCrystalTestDriver):
 
             # insert alpha22 in the middle so they end up sorted
             # into voigt notation order
-            unique_components_names.insert(1,"alpha22")
+            unique_components_names.insert(1,"alpha2")
             unique_components_values.insert(1,alpha22)
             unique_components_errs.insert(1,alpha22_err)
 
         # monoclinic or triclinic, all components potentially unique
         if space_group <= 15:
 
-            unique_components_names.append("alpha23")
-            unique_components_names.append("alpha13")
-            unique_components_names.append("alpha12")
+            unique_components_names.append("alpha4")
+            unique_components_names.append("alpha5")
+            unique_components_names.append("alpha6")
 
             unique_components_values.append(alpha23)
             unique_components_values.append(alpha13)
