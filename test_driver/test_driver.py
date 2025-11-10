@@ -15,14 +15,16 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 
 class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int, timestep: float,
-                   number_sampling_timesteps: int = 100, repeat: Sequence[int] = (3, 3, 3),
+                   number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
                    max_workers: Optional[int] = None, lammps_command = "lmp", msd_threshold: float = 0.1,
                    random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
         """
         Compute constant-pressure heat capacity from centered finite difference (see Section 3.2 in
         https://pubs.acs.org/doi/10.1021/jp909762j).
+
+        TODO: RANDOM SEEDS SHOULD PROBABLY BE SAMPLED IF NOT GIVEN? ALSO IN OTHER TEST DRIVER!
         """
-        # Set prototype label
+        # Set prototype label  # TODO: Is this fine?
         self.prototype_label = self._get_nominal_crystal_structure_npt()["prototype-label"]["source-value"]
 
         # Get temperature in Kelvin.
@@ -83,7 +85,7 @@ class TestDriver(SingleCrystalTestDriver):
         pressure_bar = -cell_cauchy_stress_bar[0]
 
          # Copy original atoms so that their information does not get lost.
-        original_atoms = self._get_atoms()
+        original_atoms = self._get_atoms()  # TODO: DO I NEED THIS?
 
         # Create atoms object that will contain the supercell.
         atoms_new = self._get_atoms()
@@ -224,7 +226,7 @@ class TestDriver(SingleCrystalTestDriver):
         assert middle_temperature is not None
 
         c = compute_heat_capacity(temperatures, log_filenames, 2)
-        alpha = compute_alpha_tensor(all_cells,temperatures)
+        alpha = compute_alpha_tensor(all_cells,temperatures)  # TODO: Check handling and passing arounds of cell?
 
         # Print result.
         print('####################################')
@@ -296,6 +298,7 @@ class TestDriver(SingleCrystalTestDriver):
                                       [alpha21_err, alpha22_err, alpha23_err],
                                       [alpha31_err, alpha32_err, alpha33_err]])
 
+        # TODO: IS THIS CORRECT?
         self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
                                                                    write_stress=True, write_temp=True)
         space_group = int(self.prototype_label.split("_")[2])
