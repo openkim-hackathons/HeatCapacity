@@ -5,7 +5,7 @@ kim init ${modelname} metal unit_conversion_mode
 boundary p p p
 
 # Explicitly include neighbor list command so that it can be changed conveniently.
-neigh_modify delay 0 every 1 check yes one 2000
+neigh_modify delay 0 every 1 check yes one 4000
 
 # Read initial zero-temperature crystal.
 read_data output/zero_temperature_crystal.lmp
