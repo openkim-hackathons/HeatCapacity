@@ -407,13 +407,13 @@ class TestDriver(SingleCrystalTestDriver):
         
         alpha_final_voigt_sym = alpha_final_voigt
         # alpha11 unique for all space groups
-        unique_components_names = ["alpha11"]
+        unique_components_names = ["alpha1"]
         unique_components_values = [alpha11]
         unique_components_errs = [alpha11_err]
 
         # hexagonal, trigonal, tetragonal space groups alpha33 also unique
         if space_group <= 194:
-            unique_components_names.append("alpha33")
+            unique_components_names.append("alpha3")
             unique_components_values.append(alpha33)
             unique_components_errs.append(alpha33_err)
 
@@ -422,16 +422,16 @@ class TestDriver(SingleCrystalTestDriver):
 
             # insert alpha22 in the middle so they end up sorted
             # into voigt notation order
-            unique_components_names.insert(1,"alpha22")
+            unique_components_names.insert(1,"alpha2")
             unique_components_values.insert(1,alpha22)
             unique_components_errs.insert(1,alpha22_err)
 
         # monoclinic or triclinic, all components potentially unique
         if space_group <= 15:
 
-            unique_components_names.append("alpha23")
-            unique_components_names.append("alpha13")
-            unique_components_names.append("alpha12")
+            unique_components_names.append("alpha4")
+            unique_components_names.append("alpha5")
+            unique_components_names.append("alpha6")
 
             unique_components_values.append(alpha23)
             unique_components_values.append(alpha13)
