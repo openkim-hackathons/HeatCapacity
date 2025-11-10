@@ -248,8 +248,6 @@ class TestDriver(SingleCrystalTestDriver):
         # Run Lammps simulations in parallel.
         assert len(temperatures) == len(random_seeds)
         futures = []
-        print(max_workers)
-        exit()
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
