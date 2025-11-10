@@ -193,9 +193,6 @@ class TestDriver(SingleCrystalTestDriver):
             repeat = (x, x, x)
 
         atoms_new = atoms_new.repeat(repeat)
-        
-        # Determine appropriate number of processors based on system size.
-        number_atoms = len(atoms_new)
 
         # Get temperatures that should be simulated.
         temperature_step = temperature_step_fraction * temperature_K
@@ -409,9 +406,8 @@ class TestDriver(SingleCrystalTestDriver):
         unique_components_values = [alpha11]
         unique_components_errs = [alpha11_err]
 
-        # hexagona, trigonal, tetragonal space groups alpha33 also unique
+        # hexagonal, trigonal, tetragonal space groups alpha33 also unique
         if space_group <= 194:
-
             unique_components_names.append("alpha33")
             unique_components_values.append(alpha33)
             unique_components_errs.append(alpha33_err)
