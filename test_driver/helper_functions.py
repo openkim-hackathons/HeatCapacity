@@ -12,8 +12,9 @@ import numpy.typing as npt
 import scipy.optimize
 
 
-def run_lammps(modelname: str, temperature_index: int, temperature: float, pressure: float, timestep: float,
-               number_sampling_timesteps: int, species: List[str], msd_threshold: float, lammps_command: str,
+def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
+               number_sampling_timesteps: int, species: List[str],
+               msd_threshold_angstrom_squared_per_hundred_timesteps: float, lammps_command: str,
                random_seed: int) -> Tuple[str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
@@ -32,24 +33,24 @@ def run_lammps(modelname: str, temperature_index: int, temperature: float, press
     :param temperature_index:
         Index of the temperature in the temperature sweep.
     :type temperature_index: int
-    :param temperature:
+    :param temperature_K:
         Target temperature in Kelvin.
-    :type temperature: float
-    :param pressure:
+    :type temperature_K: float
+    :param pressure_bar:
         Target pressure in bars.
-    :type pressure: float
-    :param timestep:
+    :type pressure_bar: float
+    :param timestep_ps:
         Timestep in picoseconds.
-    :type timestep: float
+    :type timestep_ps: float
     :param number_sampling_timesteps:
         Number of timesteps for sampling thermodynamic quantities.
     :type number_sampling_timesteps: int
     :param species:
         List of chemical species in the system.
     :type species: List[str]
-    :param msd_threshold:
+    :param msd_threshold_angstrom_squared_per_hundred_timesteps:
         Mean squared displacement threshold for vaporization in Angstroms^2 per 100*timestep.
-    :type msd_threshold: float
+    :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
     :param lammps_command:
         Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").
     :type lammps_command: str
@@ -62,26 +63,26 @@ def run_lammps(modelname: str, temperature_index: int, temperature: float, press
         file.
     :rtype: Tuple[str, str, str, str]
     """
-    pdamp = timestep * 100.0
-    tdamp = timestep * 1000.0
+    pdamp = timestep_ps * 100.0
+    tdamp = timestep_ps * 1000.0
 
     log_filename = f"output/lammps_temperature_{temperature_index}.log"
     restart_filename = f"output/final_configuration_temperature_{temperature_index}.restart"
     variables = {
         "modelname": modelname,
-        "temperature": temperature,
+        "temperature": temperature_K,
         "temperature_seed": random_seed,
         "temperature_damping": tdamp,
-        "pressure": pressure,
+        "pressure": pressure_bar,
         "pressure_damping": pdamp,
-        "timestep": timestep,
+        "timestep": timestep_ps,
         "number_sampling_timesteps": number_sampling_timesteps,
         "species": " ".join(species),
         "average_position_filename": f"output/average_position_temperature_{temperature_index}.dump.*",
         "average_cell_filename": f"output/average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
         "trajectory_filename": f"output/trajectory_{temperature_index}.lammpstrj",
-        "msd_threshold": msd_threshold
+        "msd_threshold": msd_threshold_angstrom_squared_per_hundred_timesteps
     }
 
     command = (

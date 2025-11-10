@@ -14,9 +14,10 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 
 
 class TestDriver(SingleCrystalTestDriver):
-    def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int, timestep: float,
+    def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int, timestep_ps: float,
                    number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
-                   max_workers: Optional[int] = None, lammps_command = "lmp", msd_threshold: float = 0.1,
+                   max_workers: Optional[int] = None, lammps_command = "lmp",
+                   msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
                    random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
@@ -63,10 +64,10 @@ class TestDriver(SingleCrystalTestDriver):
             temperature_step_fraction * T.
             Should be bigger than zero.
         :type number_symmetric_temperature_steps: int
-        :param timestep:
+        :param timestep_ps:
             Time step in picoseconds.
             Should be bigger than zero.
-        :type timestep: float
+        :type timestep_ps: float
         :param number_sampling_timesteps:
             Sample thermodynamic variables every number_sampling_timesteps timesteps in Lammps.
             Should be bigger than zero.
@@ -89,11 +90,11 @@ class TestDriver(SingleCrystalTestDriver):
             Command to run Lammps.
             Default is "lmp".
         :type lammps_command: str
-        :param msd_threshold:
+        :param msd_threshold_angstrom_squared_per_hundred_timesteps:
             Mean-squared displacement threshold in Angstroms^2 per 100*timestep to detect melting or vaporization.
             Default is 0.1.
             Should be bigger than zero.
-        :type msd_threshold: float
+        :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
         :param random_seeds:
             Random seeds for the Lammps simulations.
             This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
@@ -133,7 +134,7 @@ class TestDriver(SingleCrystalTestDriver):
             raise ValueError("The off-diagonal entries of the stress tensor have to be zero so that a hydrostatic "
                              "pressure is used.")
 
-        if not timestep > 0.0:
+        if not timestep_ps > 0.0:
             raise ValueError("Timestep has to be larger than zero.")
 
         if not number_symmetric_temperature_steps > 0:
@@ -158,7 +159,7 @@ class TestDriver(SingleCrystalTestDriver):
         else:
             max_workers = 1
         
-        if not msd_threshold > 0.0:
+        if not msd_threshold_angstrom_squared_per_hundred_timesteps > 0.0:
             raise ValueError("The mean-squared displacement threshold has to be bigger than zero.")
 
         if random_seeds is not None:
@@ -246,8 +247,8 @@ class TestDriver(SingleCrystalTestDriver):
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
-                    run_lammps, self.kim_model_name, i, t, pressure_bar, timestep,
-                    number_sampling_timesteps, species, msd_threshold, lammps_command, rs))
+                    run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
+                    species, msd_threshold_angstrom_squared_per_hundred_timesteps, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
