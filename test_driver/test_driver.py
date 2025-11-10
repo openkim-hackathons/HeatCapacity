@@ -1,17 +1,15 @@
 from concurrent.futures import as_completed, ProcessPoolExecutor
 import os
 import shutil
-import subprocess
 from typing import Optional, Sequence
-from ase.io.lammpsdata import write_lammps_data
 from ase.calculators.lammps import convert, Prism
 import numpy as np
 from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
 from kim_tools.symmetry_util.core import (reduce_and_avg, kstest_reduced_distances, 
                                           PeriodExtensionException, fit_voigt_tensor_to_cell_and_space_group_symb, full_to_voigt_symb)
 from kim_tools.test_driver import SingleCrystalTestDriver
-from .helper_functions import (check_lammps_log_for_wrong_structure_format, compute_alpha_tensor, compute_heat_capacity,
-                               get_cell_from_averaged_lammps_dump, get_positions_from_averaged_lammps_dump, run_lammps)
+from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
+                               get_positions_from_averaged_lammps_dump, run_lammps)
 
 
 class TestDriver(SingleCrystalTestDriver):
@@ -108,7 +106,6 @@ class TestDriver(SingleCrystalTestDriver):
         test_driver_directory = os.path.dirname(os.path.realpath(__file__))
         if os.getcwd() != test_driver_directory:
             shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), "npt.lammps")
-            shutil.copyfile(os.path.join(test_driver_directory, "file_read_test.lammps"), "file_read_test.lammps")
             shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"), "run_length_control.py")
         # Choose the correct accuracies file for kim-convergence based on whether the cell is orthogonal or not.
         with open("accuracies.py", "w") as file:
@@ -139,25 +136,8 @@ class TestDriver(SingleCrystalTestDriver):
 
         # Write lammps file.
         structure_file = "output/zero_temperature_crystal.lmp"
-        atoms_new.write(structure_file, format="lammps-data", masses=True, units="metal")
-
-        # Handle cases where kim models expect different structure file formats.
-        try:
-            run_lammps(self.kim_model_name, 0, temperatures[0], pressure_bar, timestep,
-                       number_sampling_timesteps, species, msd_threshold, lammps_command=lammps_command, test_file_read=True)
-        except subprocess.CalledProcessError as e:
-            wrong_format_error = check_lammps_log_for_wrong_structure_format(
-                "output/lammps_file_format_test_temperature_0.log")
-
-            if wrong_format_error:
-                # write the atom configuration file in the 'charge' format some models expect
-                #assign_charges(atoms_new)
-                write_lammps_data(structure_file, atoms_new, atom_style="charge", masses=True, units="metal")
-                # try to read the file again, raise any exeptions that might happen
-                run_lammps(self.kim_model_name, 0, temperatures[0], pressure_bar, timestep,
-                           number_sampling_timesteps, species, msd_threshold, lammps_command=lammps_command, test_file_read=True)
-            else:
-                raise e
+        atom_style = self._get_supported_lammps_atom_style()
+        atoms_new.write(structure_file, format="lammps-data", masses=True, units="metal", atom_style=atom_style)
 
         # Run Lammps simulations in parallel.
         futures = []
@@ -175,12 +155,6 @@ class TestDriver(SingleCrystalTestDriver):
                 for f in futures:
                     f.cancel()
                 raise exception
-
-        # Cleanup.
-        if os.getcwd() != test_driver_directory:
-            os.remove("npt.lammps")
-            os.remove("file_read_test.lammps")
-            os.remove("run_length_control.py")
 
         # Collect results and check that symmetry is unchanged after all simulations.
         log_filenames = []
@@ -206,7 +180,7 @@ class TestDriver(SingleCrystalTestDriver):
 
             if t_index == number_symmetric_temperature_steps:
                 # Store the atoms of the middle temperature for later because their crystal genome designation 
-                # will be used for the heat-capacity and thermal expansion lrties.
+                # will be used for the heat-capacity and thermal expansion properties.
                 middle_temperature_atoms = reduced_atoms.copy()
                 middle_temperature = t
             
@@ -362,9 +336,7 @@ class TestDriver(SingleCrystalTestDriver):
             unique_components_errs.append(alpha13_err)
             unique_components_errs.append(alpha12_err)
 
-        print(alpha_final_voigt)
-        # print(alpha_final_voigt_err)
-        # TODO: add unvertianty info once we decide how to calculate cell errors
+        # TODO: add uncertainty info once we decide how to calculate cell errors
         self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt, "1/K")
         self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt-symmetry-reduced", alpha_final_voigt_sym,"1/K")
         self._add_key_to_current_property_instance("unique-components-names",unique_components_names)
