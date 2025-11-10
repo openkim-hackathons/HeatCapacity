@@ -157,8 +157,9 @@ class TestDriver(SingleCrystalTestDriver):
         if not all(r >= 0 for r in repeat):
             raise ValueError("All number of repeats must be bigger than zero.")
 
-        if max_workers is not None and not max_workers > 0:
-            raise ValueError("Maximum number of workers has to be bigger than zero.")
+        if max_workers is not None:
+            if not max_workers > 0:
+                raise ValueError("Maximum number of workers has to be bigger than zero.")
         else:
             max_workers = 1
         
@@ -247,6 +248,8 @@ class TestDriver(SingleCrystalTestDriver):
         # Run Lammps simulations in parallel.
         assert len(temperatures) == len(random_seeds)
         futures = []
+        print(max_workers)
+        exit()
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
