@@ -338,7 +338,7 @@ class TestDriver(SingleCrystalTestDriver):
         self._add_key_to_current_property_instance(
             "constant-pressure-heat-capacity-per-atom",
             c[f"finite_difference_accuracy_{max_accuracy}"][0] / number_atoms,
-            "eV/Kelvin",
+            "eV/K",
             uncertainty_info={
                 "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / number_atoms})
         number_atoms_in_formula = sum(get_stoich_reduced_list_from_prototype(self.prototype_label))
@@ -347,14 +347,14 @@ class TestDriver(SingleCrystalTestDriver):
         self._add_key_to_current_property_instance(
             "constant-pressure-heat-capacity-per-formula",
             c[f"finite_difference_accuracy_{max_accuracy}"][0] / number_formula,
-            "eV/Kelvin",
+            "eV/K",
             uncertainty_info={
                 "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / number_formula})
         total_mass_g_per_mol = sum(atoms_new.get_masses())
         self._add_key_to_current_property_instance(
             "constant-pressure-specific-heat-capacity",
             c[f"finite_difference_accuracy_{max_accuracy}"][0] / total_mass_g_per_mol,
-            "eV/Kelvin/(g/mol)",
+            "eV/K/(g/mol)",
             uncertainty_info={
                 "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / total_mass_g_per_mol})
 
