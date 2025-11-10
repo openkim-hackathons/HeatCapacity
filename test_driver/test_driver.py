@@ -14,8 +14,8 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 
 
 class TestDriver(SingleCrystalTestDriver):
-    def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int, timestep_ps: float,
-                   number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
+    def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int,
+                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
                    max_workers: Optional[int] = None, lammps_command = "lmp",
                    msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
                    random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
@@ -67,10 +67,12 @@ class TestDriver(SingleCrystalTestDriver):
         :type number_symmetric_temperature_steps: int
         :param timestep_ps:
             Time step in picoseconds.
+            Default is 0.001 ps (1 fs).
             Should be bigger than zero.
         :type timestep_ps: float
         :param number_sampling_timesteps:
             Sample thermodynamic variables every number_sampling_timesteps timesteps in Lammps.
+            Default is 100 timesteps.
             Should be bigger than zero.
         :type number_sampling_timesteps: int
         :param repeat:
