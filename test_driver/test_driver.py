@@ -6,8 +6,8 @@ from typing import Optional, Sequence
 from ase.calculators.lammps import convert, Prism
 import numpy as np
 from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
-from kim_tools.symmetry_util.core import (reduce_and_avg, kstest_reduced_distances, 
-                                          PeriodExtensionException, fit_voigt_tensor_to_cell_and_space_group_symb, full_to_voigt_symb)
+from kim_tools.symmetry_util.core import (reduce_and_avg, PeriodExtensionException,
+                                          fit_voigt_tensor_to_cell_and_space_group_symb, full_to_voigt_symb)
 from kim_tools.test_driver import SingleCrystalTestDriver
 from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
                                get_positions_from_averaged_lammps_dump, run_lammps)
@@ -188,7 +188,14 @@ class TestDriver(SingleCrystalTestDriver):
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))
             atoms_new.set_scaled_positions(
                 get_positions_from_averaged_lammps_dump(average_position_filename))
-            reduced_atoms, reduced_distances = reduce_and_avg(atoms_new, repeat)
+
+            try:
+                reduced_atoms = reduce_and_avg(atoms_new, repeat)
+            except PeriodExtensionException as e:
+                atoms_new.write(f"output/final_configuration_temperature_{t_index}_failing.poscar",
+                                format="vasp", sort=True)
+                raise KIMTestDriverError(f"Could not reduce structure after NPT simulation at "
+                                         f"temperature {t} K (temperature index {t_index}): {e}")
 
             if t_index == number_symmetric_temperature_steps:
                 # Store the atoms of the middle temperature for later because their crystal genome designation 
@@ -201,15 +208,6 @@ class TestDriver(SingleCrystalTestDriver):
                 reduced_atoms.write(f"output/reduced_atoms_temperature_{t_index}_failing.poscar",
                                     format="vasp", sort=True)
                 raise KIMTestDriverError(f"Symmetry of structure changed during simulation at temperature {t} K.")
-            # Check that the reduced distances are normally distributed.
-            try:
-                kstest_reduced_distances(reduced_distances, significance_level=0.05,
-                                         plot_filename=f"output/reduced_distance_histogram_temperature_{t_index}.pdf",
-                                         number_bins=20)
-            except PeriodExtensionException as e:
-                reduced_atoms.write(f"output/reduced_atoms_temperature_{t_index}_failing.poscar",
-                                    format="vasp", sort=True)
-                raise KIMTestDriverError(f"Reduced distances are not normally distributed at temperature {t} K: {e}")
             
             # Write NPT crystal structures.
             self._update_nominal_parameter_values(reduced_atoms)
