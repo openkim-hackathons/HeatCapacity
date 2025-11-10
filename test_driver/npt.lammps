@@ -30,7 +30,8 @@ velocity all create $(v_temperature*v__u_temperature) ${temperature_seed}
 
 # Equilibrate and sample in NPT ensemble.
 fix NPT all npt temp $(v_temperature*v__u_temperature) $(v_temperature*v__u_temperature) $(v_temperature_damping*v__u_time) &
-                tri $(v_pressure*v__u_pressure) $(v_pressure*v__u_pressure) $(v_pressure_damping*v__u_time)
+                tri $(v_pressure*v__u_pressure) $(v_pressure*v__u_pressure) $(v_pressure_damping*v__u_time) &
+                flip no
 
 # Set timestep.
 timestep $(v_timestep*v__u_time)

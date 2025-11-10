@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 import numpy as np
-from typing import Optional, Sequence
+from typing import Optional
 from lammps import lammps
 import kim_convergence as cr
 from accuracies import RELATIVE_ACCURACY, ABSOLUTE_ACCURACY
