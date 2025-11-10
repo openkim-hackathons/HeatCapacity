@@ -48,7 +48,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature: float, press
         List of chemical species in the system.
     :type species: List[str]
     :param msd_threshold:
-        Mean squared displacement threshold for vaporization in Angstroms^2 per number_sampling_timesteps*timestep.
+        Mean squared displacement threshold for vaporization in Angstroms^2 per 100*timestep.
     :type msd_threshold: float
     :param lammps_command:
         Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").

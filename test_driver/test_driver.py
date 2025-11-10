@@ -19,12 +19,94 @@ class TestDriver(SingleCrystalTestDriver):
                    max_workers: Optional[int] = None, lammps_command = "lmp", msd_threshold: float = 0.1,
                    random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
         """
-        Compute constant-pressure heat capacity from centered finite difference (see Section 3.2 in
-        https://pubs.acs.org/doi/10.1021/jp909762j).
+        Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
+        derivatives.
 
-        TODO: RANDOM SEEDS SHOULD PROBABLY BE SAMPLED IF NOT GIVEN? ALSO IN OTHER TEST DRIVER!
+        Section 3.2 in https://pubs.acs.org/doi/10.1021/jp909762j argues that the centered finite-difference approach
+        is more accurate than fluctuation-based approaches for computing heat capacities from molecular-dynamics
+        simulations.
+
+        The finite-difference approach requires to run at least three molecular-dynamics simulations at different
+        temperatures, one at the target temperature, one at a slightly lower temperature and one at a slightly higher
+        temperature.  It is possible to add more temperature points symmetrically around the target temperature for
+        higher-order finite-difference schemes.
+
+        This test driver repeats the unit cell to build a supercell and then runs molecular-dynamics simulations in the
+        NPT ensemble using Lammps.
+
+        This test driver uses kim_convergence to detect an equilibrated molecular-dynamics simulation. It checks
+        convergence of the volume, temperature, enthalpy and cell shape parameters every 10000 timesteps.
+
+        After the molecular-dynamics simulations, the symmetry of the final structures are checked to ensure that they
+        did not change.
+
+        The crystals might melt or vaporize during the simulations. In that case, kim_convergence would only detect
+        equilibration after an unnecessarily long simulation. Therefore, we initially check for melting or vaporization
+        during a short initial simulation of 5000 timesteps. During this run, we monitor the mean-squared displacement
+        (MSD) of atoms during the simulation. If the MSD exceeds a given threshold value (msd_threshold), an error is
+        raised.
+
+        :param temperature_step_fraction:
+            Fraction of the target temperature that is used as temperature step for the finite-difference scheme.
+            For example, if the target temperature is 300 K and the temperature_step_fraction is 0.1, the temperature
+            difference between the different NPT simulations will be 30 K.
+            Should be bigger than zero and smaller than one divided by number_symmetric_temperature_steps (to avoid
+            simulations at negative temperatures).
+        :type temperature_step_fraction: float
+        :param number_symmetric_temperature_steps:
+            Number of symmetric temperature steps around the target temperature to use for the finite-difference
+            scheme.
+            For example, if number_symmetric_temperature_steps is 2, five NPT simulations will be run at temperatures
+            T - 2*delta_T, T - delta_T, T, T + delta_T, T + 2*delta_T, where delta_T is determined by
+            temperature_step_fraction * T.
+            Should be bigger than zero.
+        :type number_symmetric_temperature_steps: int
+        :param timestep:
+            Time step in picoseconds.
+            Should be bigger than zero.
+        :type timestep: float
+        :param number_sampling_timesteps:
+            Sample thermodynamic variables every number_sampling_timesteps timesteps in Lammps.
+            Should be bigger than zero.
+        :type number_sampling_timesteps: int
+        :param repeat:
+            Tuple of three integers specifying how often to repeat the unit cell in each direction to build the
+            supercell.
+            If (0, 0, 0) is given, a supercell size close to 10,000 atoms is chosen.
+            Default is (0, 0, 0).
+            All entries have to be bigger than zero.
+        :type repeat: Sequence[int]
+        :param max_workers:
+            Maximum number of parallel workers to use for running Lammps simulations at different temperatures.
+            If None is given, this will be set to 1.
+            This is independent of the number of processors used by each Lammps simulation that can be specified in the
+            lammps command itself.
+            Default is None.
+        :type max_workers: Optional[int]
+        :param lammps_command:
+            Command to run Lammps.
+            Default is "lmp".
+        :type lammps_command: str
+        :param msd_threshold:
+            Mean-squared displacement threshold in Angstroms^2 per 100*timestep to detect melting or vaporization.
+            Default is 0.1.
+            Should be bigger than zero.
+        :type msd_threshold: float
+        :param random_seeds:
+            Random seeds for the Lammps simulations.
+            This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
+            temperatures being simulated.
+            If None is given, random seeds will be sampled.
+            Each seed should be bigger than zero.
+        :type random_seeds: Optional[Sequence[int]]
+
+        :raises ValueError:
+            If any of the input arguments are invalid.
+        :raises KIMTestDriverError:
+            If the crystal melts or vaporizes during the simulation.
+            If the symmetry of the structure changes.
         """
-        # Set prototype label  # TODO: Is this fine?
+        # Set prototype label.
         self.prototype_label = self._get_nominal_crystal_structure_npt()["prototype-label"]["source-value"]
 
         # Get temperature in Kelvin.
@@ -35,48 +117,53 @@ class TestDriver(SingleCrystalTestDriver):
 
         # Check arguments.
         if not temperature_K > 0.0:
-            raise RuntimeError("Temperature has to be larger than zero.")
+            raise ValueError("Temperature has to be larger than zero.")
 
         if not len(cell_cauchy_stress_bar) == 6:
-            raise RuntimeError("Specify all six (x, y, z, xy, xz, yz) entries of the cauchy stress tensor.")
+            raise ValueError("Specify all six (x, y, z, xy, xz, yz) entries of the cauchy stress tensor.")
 
         if not (cell_cauchy_stress_bar[0] == cell_cauchy_stress_bar[1] == cell_cauchy_stress_bar[2]):
-            raise RuntimeError("The diagonal entries of the stress tensor have to be equal so that a hydrostatic "
-                               "pressure is used.")
+            raise ValueError("The diagonal entries of the stress tensor have to be equal so that a hydrostatic "
+                             "pressure is used.")
 
         if not (cell_cauchy_stress_bar[3] == cell_cauchy_stress_bar[4] == cell_cauchy_stress_bar[5] == 0.0):
-            raise RuntimeError("The off-diagonal entries of the stress tensor have to be zero so that a hydrostatic "
-                               "pressure is used.")
+            raise ValueError("The off-diagonal entries of the stress tensor have to be zero so that a hydrostatic "
+                             "pressure is used.")
+
+        if not timestep > 0.0:
+            raise ValueError("Timestep has to be larger than zero.")
 
         if not number_symmetric_temperature_steps > 0:
-            raise RuntimeError("Number of symmetric temperature steps has to be bigger than zero.")
+            raise ValueError("Number of symmetric temperature steps has to be bigger than zero.")
 
         if number_symmetric_temperature_steps * temperature_step_fraction >= 1.0:
-            raise RuntimeError(
+            raise ValueError(
                 "The given number of symmetric temperature steps and the given temperature-step fraction "
                 "would yield zero or negative temperatures.")
 
         if not number_sampling_timesteps > 0:
-            raise RuntimeError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
+            raise ValueError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
 
         if not len(repeat) == 3:
-            raise RuntimeError("The repeat argument has to be a tuple of three integers.")
+            raise ValueError("The repeat argument has to be a tuple of three integers.")
 
         if not all(r >= 0 for r in repeat):
-            raise RuntimeError("All number of repeats must be bigger than zero.")
+            raise ValueError("All number of repeats must be bigger than zero.")
 
         if max_workers is not None and not max_workers > 0:
-            raise RuntimeError("Maximum number of workers has to be bigger than zero.")
+            raise ValueError("Maximum number of workers has to be bigger than zero.")
+        else:
+            max_workers = 1
         
         if not msd_threshold > 0.0:
-            raise RuntimeError("The mean-squared displacement threshold has to be bigger than zero.")
+            raise ValueError("The mean-squared displacement threshold has to be bigger than zero.")
 
         if random_seeds is not None:
             if len(random_seeds) != 2 * number_symmetric_temperature_steps + 1:
-                raise RuntimeError("If random seeds are given, their number has to match the number of temperatures "
-                                   "being simulated.")
+                raise ValueError("If random seeds are given, their number has to match the number of temperatures "
+                                 "being simulated.")
             if not all(rs > 0 for rs in random_seeds):
-                raise RuntimeError("All random seeds must be bigger than zero.")
+                raise ValueError("All random seeds must be bigger than zero.")
         else:
             # Get random 31-bit unsigned integers.
             random_seeds = [random.getrandbits(31) for _ in range(2 * number_symmetric_temperature_steps + 1)]
