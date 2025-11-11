@@ -14,11 +14,11 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 
 
 class TestDriver(SingleCrystalTestDriver):
-    def _calculate(self, temperature_step_fraction: float, number_symmetric_temperature_steps: int,
+    def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
                    timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
                    max_workers: Optional[int] = None, lammps_command = "lmp",
                    msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
-                   random_seeds: Optional[Sequence[int]] = None, **kwargs) -> None:
+                   random_seeds: Optional[Sequence[int]] = (1, 2, 3), **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
         derivatives.
@@ -56,6 +56,8 @@ class TestDriver(SingleCrystalTestDriver):
             difference between the different NPT simulations will be 30 K.
             Should be bigger than zero and smaller than one divided by number_symmetric_temperature_steps (to avoid
             simulations at negative temperatures).
+            Default is 0.01 (1% of the target temperature).
+            Should be bigger than zero and smaller than one.
         :type temperature_step_fraction: float
         :param number_symmetric_temperature_steps:
             Number of symmetric temperature steps around the target temperature to use for the finite-difference
@@ -63,6 +65,7 @@ class TestDriver(SingleCrystalTestDriver):
             For example, if number_symmetric_temperature_steps is 2, five NPT simulations will be run at temperatures
             T - 2*delta_T, T - delta_T, T, T + delta_T, T + 2*delta_T, where delta_T is determined by
             temperature_step_fraction * T.
+            Default is 1.
             Should be bigger than zero.
         :type number_symmetric_temperature_steps: int
         :param timestep_ps:
@@ -103,6 +106,7 @@ class TestDriver(SingleCrystalTestDriver):
             This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
             temperatures being simulated.
             If None is given, random seeds will be sampled.
+            Default is (1, 2, 3).
             Each seed should be bigger than zero.
         :type random_seeds: Optional[Sequence[int]]
 
@@ -139,6 +143,9 @@ class TestDriver(SingleCrystalTestDriver):
 
         if not timestep_ps > 0.0:
             raise ValueError("Timestep has to be larger than zero.")
+
+        if not 0.0 < temperature_step_fraction < 1.0:
+            raise ValueError("Temperature-step fraction has to be bigger than zero and smaller than one.")
 
         if not number_symmetric_temperature_steps > 0:
             raise ValueError("Number of symmetric temperature steps has to be bigger than zero.")
