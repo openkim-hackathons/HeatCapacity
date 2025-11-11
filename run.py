@@ -28,7 +28,7 @@ if __name__ == '__main__':
         try:
             test_driver(queried_structure, temperature_K=293.15,
                         cell_cauchy_stress_eV_angstrom3=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        temperature_step_fraction=0.01, number_symmetric_temperature_steps=1, timestep=0.001,
+                        temperature_step_fraction=0.01, number_symmetric_temperature_steps=1, timestep_ps=0.001,
                         number_sampling_timesteps=100, repeat=(4, 4, 4), max_workers=3, msd_threshold=0.1,
                         lammps_command="lmp", random_seeds=(1, 2, 3))
         except Exception as e:

@@ -1,7 +1,7 @@
 {
-  "title" "Finite temperature properties including heat capacity and thermal expansion tensor for {{stoichiometric_species|join("")}} in AFLOW crystal prototype {{prototype_label}} at zero pressure v000"
+  "title" "Finite temperature properties including heat capacity and thermal expansion tensor for {{stoichiometric_species|join("")}} in AFLOW crystal prototype {{prototype_label}} at zero pressure v{{version}}"
   "description" "Given the zero-pressure, zero-temperature structure of {{stoichiometric_species|join("")}} in AFLOW crystal prototype {{prototype_label}}, this Test computes the corresponding heat capacity and thermal expansion tensor using numerical differentiation."
-  "extended-id" "{{TEST_DRIVER_NAME.split('_')[:-4]|join('_')}}_{{prototype_label}}_{{stoichiometric_species|join("")}}__TE_{{kimnum}}_000"
+  "extended-id" "{{TEST_DRIVER_NAME.split('_')[:-4]|join('_')}}_{{prototype_label}}_{{stoichiometric_species|join("")}}_{{temperature_K|replace('.','_')}}_K_{{(cell_cauchy_stress_eV_angstrom3.0~'_eV_per_angstrom3_' if cell_cauchy_stress_eV_angstrom3 is defined else '')|replace('.','_')}}_TE_{{kimnum}}_{{version}}"
   "test-driver" "{{TEST_DRIVER_NAME}}"
   "species" ["{{stoichiometric_species|join('" "')}}"]
   "contributor-id" "66443d60-a76c-472c-987e-dd80fde07aae"
@@ -10,6 +10,6 @@
   "domain" "openkim.org"
   "matching-models" ["standard-models"]
   "disclaimer" "Computer generated"
-  "kim-api-version" "2.3"
-  "publication-year" "2024"
+  "kim-api-version" "2.4"
+  "publication-year" "2025"
 }{# FILENAME = kimspec.edn #}
