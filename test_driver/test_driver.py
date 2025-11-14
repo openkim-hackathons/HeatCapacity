@@ -278,14 +278,17 @@ class TestDriver(SingleCrystalTestDriver):
         for t_index, (future, t) in enumerate(zip(futures, temperatures)):
             assert future.done()
             assert future.exception() is None
-            log_filename, restart_filename, average_position_filename, average_cell_filename = future.result()
+            (log_filename, restart_filename, average_position_filename, average_cell_filename,
+             melted_crystal_filename) = future.result()
             log_filenames.append(log_filename)
 
             # Check that crystal did not melt or vaporize.
             with open(log_filename, "r") as f:
                 for line in f:
                     if line.startswith("Crystal melted or vaporized"):
+                        assert os.path.exists(melted_crystal_filename)
                         raise KIMTestDriverError(f"Crystal melted or vaporized during simulation at temperature {t} K.")
+            assert not os.path.exists(melted_crystal_filename)
 
             # Process results and check that symmetry is unchanged after simulation.
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))

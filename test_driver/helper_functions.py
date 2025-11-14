@@ -15,7 +15,7 @@ import scipy.optimize
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
                number_sampling_timesteps: int, species: List[str],
                msd_threshold_angstrom_squared_per_hundred_timesteps: float, lammps_command: str,
-               random_seed: int) -> Tuple[str, str, str, str]:
+               random_seed: int) -> Tuple[str, str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
 
@@ -59,15 +59,16 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     :type random_seed: int
 
     :return:
-        A tuple containing paths to the LAMMPS log file, restart file, full average position file, and full average cell
-        file.
-    :rtype: Tuple[str, str, str, str]
+        A tuple containing paths to the LAMMPS log file, restart file, full average position file, full average cell
+        file, and melted crystal dump file (only exists if crystal melted).
+    :rtype: Tuple[str, str, str, str, str]
     """
     pdamp = timestep_ps * 100.0
     tdamp = timestep_ps * 1000.0
 
     log_filename = f"output/lammps_temperature_{temperature_index}.log"
     restart_filename = f"output/final_configuration_temperature_{temperature_index}.restart"
+    melted_crystal_filename = f"output/melted_crystal_temperature_{temperature_index}.dump"
     variables = {
         "modelname": modelname,
         "temperature": temperature_K,
@@ -82,7 +83,8 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "average_cell_filename": f"output/average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
         "trajectory_filename": f"output/trajectory_{temperature_index}.lammpstrj",
-        "msd_threshold": msd_threshold_angstrom_squared_per_hundred_timesteps
+        "msd_threshold": msd_threshold_angstrom_squared_per_hundred_timesteps,
+        "melted_crystal_output": melted_crystal_filename
     }
 
     command = (
@@ -108,7 +110,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     compute_average_cell_from_lammps_dump(f"output/average_cell_temperature_{temperature_index}.dump",
                                           full_average_cell_file, equilibration_time)
 
-    return log_filename, restart_filename, full_average_position_file, full_average_cell_file
+    return log_filename, restart_filename, full_average_position_file, full_average_cell_file, melted_crystal_filename
 
 
 def plot_property_from_lammps_log(in_file_path: str, property_names: Iterable[str]) -> None:
