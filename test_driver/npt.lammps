@@ -60,6 +60,9 @@ variable yz_metal equal yz/${_u_distance}
 # In metal units: 1 bar Angstrom^3 = 6.241509074460762e-7 eV
 variable enthalpy_metal equal "v_pe_metal + v_ke_metal + v_press_metal * v_vol_metal * 6.241509074460762e-7"
 
+# Write trajectory.
+dump traj all atom 10000 ${trajectory_filename}
+
 # Temperature may be off because of rigid bodies or SHAKE constraints.
 # See https://docs.lammps.org/velocity.html
 run 0
@@ -83,7 +86,7 @@ thermo 1000
         
 # Perform a short run and decide whether or not to quit
 run 5000
-if "${msd_slope} > $(v_msd_threshold*(v__u_distance^2)/v__u_time)" then "write_dump all atom ${melted_crystal_output}" &
+if "${msd_slope} > $(v_msd_threshold*(v__u_distance^2))" then "write_dump all atom ${melted_crystal_output}" &
                                                                         "print 'Crystal melted or vaporized'" &
                                                                         "quit"
 unfix msd_vector
@@ -124,17 +127,14 @@ variable zsu atom "(c_up[3]-zlo)/(zhi-zlo)"
 fix avePos all ave/atom 1 10000 10000 v_xsu v_ysu v_zsu
 dump avePosDump all custom 10000 ${average_position_filename} id f_avePos[1] f_avePos[2] f_avePos[3]
 
-# Prevent dump at timestep 0.
-dump_modify avePosDump delay 10000
+# Prevent dump at timestep 0 and 10000.
+dump_modify avePosDump delay 20000
 
 # Average the cell information.
 variable lx_metal equal "v_xhi_metal - v_xlo_metal"
 variable ly_metal equal "v_yhi_metal - v_ylo_metal"
 variable lz_metal equal "v_zhi_metal - v_zlo_metal"
 fix aveCell all ave/time 1 10000 10000 v_lx_metal v_ly_metal v_lz_metal v_xy_metal v_xz_metal v_yz_metal file ${average_cell_filename}
-
-# Write trajectory.
-dump traj all atom 10000 ${trajectory_filename}
 
 # Set up convergence check with kim-convergence.
 # python run_length_control input 8 SELF 1 variable vol_metal variable temp_metal variable enthalpy_metal format pissssss file run_length_control.py
