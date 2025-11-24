@@ -345,33 +345,42 @@ class TestDriver(SingleCrystalTestDriver):
 
         # Write property.
         max_accuracy = len(temperatures) - 1
-        self._update_nominal_parameter_values(middle_temperature_atoms)
-        self._add_property_instance_and_common_crystal_genome_keys(
-            "heat-capacity-npt", write_stress=True, write_temp=middle_temperature)
         assert len(atoms_new) == len(original_atoms) * repeat[0] * repeat[1] * repeat[2]
         number_atoms = len(atoms_new)
+        self._update_nominal_parameter_values(middle_temperature_atoms)
+        constant_pressure_heat_capacity = c[f"finite_difference_accuracy_{max_accuracy}"][0]
+        constant_pressure_heat_capacity_uncert = c[f"finite_difference_accuracy_{max_accuracy}"][1]
+        # If relative uncertainty is too high, print a disclaimer.
+        relative_uncertainty = constant_pressure_heat_capacity_uncert / abs(constant_pressure_heat_capacity)
+        if relative_uncertainty > 0.1:
+            disclaimer = (
+                f"The relative uncertainty {relative_uncertainty} of the constant-pressure heat capacity is larger than "
+                f"10%. Consider changing the temperature_step_fraction, number_symmetric_temperature_steps and repeat"
+                f"arguments to improve results.\nSee stdout and logs for calculation details."
+            )
+        else:
+            disclaimer = None
+
+        self._add_property_instance_and_common_crystal_genome_keys(
+            "heat-capacity-npt", write_stress=True, write_temp=middle_temperature, disclaimer=disclaimer)
         self._add_key_to_current_property_instance(
-            "constant-pressure-heat-capacity-per-atom",
-            c[f"finite_difference_accuracy_{max_accuracy}"][0] / number_atoms,
+            "constant-pressure-heat-capacity-per-atom", constant_pressure_heat_capacity / number_atoms,
             "eV/K",
-            uncertainty_info={
-                "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / number_atoms})
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_atoms})
+
         number_atoms_in_formula = sum(get_stoich_reduced_list_from_prototype(self.prototype_label))
         assert number_atoms % number_atoms_in_formula == 0
         number_formula = number_atoms // number_atoms_in_formula
         self._add_key_to_current_property_instance(
-            "constant-pressure-heat-capacity-per-formula",
-            c[f"finite_difference_accuracy_{max_accuracy}"][0] / number_formula,
+            "constant-pressure-heat-capacity-per-formula", constant_pressure_heat_capacity / number_formula,
             "eV/K",
-            uncertainty_info={
-                "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / number_formula})
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_formula})
+
         total_mass_g_per_mol = sum(atoms_new.get_masses())
         self._add_key_to_current_property_instance(
-            "constant-pressure-specific-heat-capacity",
-            c[f"finite_difference_accuracy_{max_accuracy}"][0] / total_mass_g_per_mol,
+            "constant-pressure-specific-heat-capacity", constant_pressure_heat_capacity / total_mass_g_per_mol,
             "eV/K/(g/mol)",
-            uncertainty_info={
-                "source-std-uncert-value": c[f"finite_difference_accuracy_{max_accuracy}"][1] / total_mass_g_per_mol})
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / total_mass_g_per_mol})
 
         alpha11 = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][0]
         alpha11_err = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][1]
