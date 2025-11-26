@@ -7,7 +7,7 @@ from ase.calculators.lammps import convert, Prism
 import numpy as np
 from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
 from kim_tools.symmetry_util.core import (reduce_and_avg, PeriodExtensionException,
-                                          fit_voigt_tensor_to_cell_and_space_group_symb, full_to_voigt_symb)
+                                           fit_voigt_tensor_to_cell_and_space_group,)
 from kim_tools.test_driver import SingleCrystalTestDriver
 from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
                                get_positions_from_averaged_lammps_dump, run_lammps)
@@ -418,16 +418,16 @@ class TestDriver(SingleCrystalTestDriver):
         space_group = int(self.prototype_label.split("_")[2])
 
         # thermal expansion tensor in voigt notation
-        alpha_final_voigt = full_to_voigt_symb(alpha_final)
+        alpha_final_voigt_nonsymb = np.asarray([alpha11,alpha22,alpha33,alpha23,alpha13,alpha12])
 
         # TODO: upgrade to fit_voigt_tensor_and_error_to_cell_and_space_group()
         # once errors are being calculated
         center_cell = all_cells[int(np.floor(len(all_cells)/2))]
-        alpha_final_voigt_sym = fit_voigt_tensor_to_cell_and_space_group_symb(alpha_final_voigt,
-                                                                               center_cell,
-                                                                               space_group)
         
-        alpha_final_voigt_sym = alpha_final_voigt
+        alpha_final_voigt_sym = fit_voigt_tensor_to_cell_and_space_group(alpha_final_voigt_nonsymb,
+                                                                         center_cell,
+                                                                         space_group)
+        
         # alpha11 unique for all space groups
         unique_components_names = ["alpha1"]
         unique_components_values = [alpha11]
@@ -464,7 +464,7 @@ class TestDriver(SingleCrystalTestDriver):
             unique_components_errs.append(alpha12_err)
 
         # TODO: add uncertainty info once we decide how to calculate cell errors
-        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt, "1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt_nonsymb, "1/K")
         self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt-symmetry-reduced", alpha_final_voigt_sym,"1/K")
         self._add_key_to_current_property_instance("unique-components-names",unique_components_names)
         self._add_key_to_current_property_instance("unique-components-values",unique_components_values,"1/K")
