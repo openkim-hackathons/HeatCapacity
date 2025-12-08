@@ -592,7 +592,7 @@ def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.
         new_cell = new_cells[index]
 
         # calculate the deformation matrix from the old and new cells
-        deformation = np.linalg.solve(new_cell,center_cell) - np.identity(dim)
+        deformation = np.linalg.solve(center_cell,new_cell) - np.identity(dim)
 
         strain = np.empty((dim,dim))
 
