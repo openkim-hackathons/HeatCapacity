@@ -382,35 +382,19 @@ class TestDriver(SingleCrystalTestDriver):
             "eV/K/(g/mol)",
             uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / total_mass_g_per_mol})
 
-        alpha11 = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha11_err = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha12 = alpha[0][1][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha12_err = alpha[0][1][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha13 = alpha[0][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha13_err = alpha[0][2][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha22 = alpha[1][1][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha22_err = alpha[1][1][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha23 = alpha[1][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha23_err = alpha[1][2][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha33 = alpha[2][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha33_err = alpha[2][2][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha11 = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha22 = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha33 = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha23 = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha13 = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha12 = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][0]
 
-        # enforce tensor symmetries
-        alpha21 = alpha12
-        alpha31 = alpha13
-        alpha32 = alpha23
-
-        alpha21_err = alpha12_err
-        alpha31_err = alpha13_err
-        alpha32_err = alpha23_err
-
-        alpha_final = np.asarray([[alpha11, alpha12, alpha13],
-                                  [alpha21, alpha22, alpha23],
-                                  [alpha31, alpha32, alpha33]])
-
-        alpha_final_err = np.asarray([[alpha11_err, alpha12_err, alpha13_err],
-                                      [alpha21_err, alpha22_err, alpha23_err],
-                                      [alpha31_err, alpha32_err, alpha33_err]])
+        alpha11_err = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha22_err = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha33_err = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha23_err = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha13_err = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][1]
+        alpha12_err = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][1]
 
         # property can be referred to with or without tags
         self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",

@@ -584,8 +584,6 @@ def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.
 
     center_cell = new_cells[int(np.floor(len(new_cells)/2))]
 
-    center_cell_inverse = np.linalg.inv(center_cell)
-
     strains=[]
 
     # calculate the strain matrix
@@ -594,7 +592,7 @@ def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.
         new_cell = new_cells[index]
 
         # calculate the deformation matrix from the old and new cells
-        deformation = np.matmul(new_cell, center_cell_inverse) - np.identity(dim)
+        deformation = np.linalg.solve(new_cell,center_cell) - np.identity(dim)
 
         strain = np.empty((dim,dim))
 
@@ -675,15 +673,7 @@ def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.
                                                                                                    strain_errs,
                                                                                                    accuracy)
 
-
-    # enforce tensor symmetries
-    alpha21 = alpha12
-    alpha31 = alpha13
-    alpha32 = alpha23
-
-    alpha = np.array([[alpha11, alpha12, alpha13],
-                      [alpha21, alpha22, alpha23],
-                      [alpha31, alpha32, alpha33]])
+    alpha_voigt = np.asarray([alpha11,alpha22,alpha33,alpha23,alpha13,alpha12])
 
     # thermal expansion coeff tensor
-    return alpha
+    return alpha_voigt
