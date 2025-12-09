@@ -389,12 +389,12 @@ class TestDriver(SingleCrystalTestDriver):
         alpha13 = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][0]
         alpha12 = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][0]
 
-        alpha11_err = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha22_err = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha33_err = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha23_err = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha13_err = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha12_err = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha11_err = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha22_err = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha33_err = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha23_err = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha13_err = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha12_err = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][1]
 
         # property can be referred to with or without tags
         self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
@@ -415,13 +415,13 @@ class TestDriver(SingleCrystalTestDriver):
         # alpha11 unique for all space groups
         unique_components_names = ["alpha1"]
         unique_components_values = [alpha11]
-        unique_components_errs = [alpha11_err]
+        # unique_components_errs = [alpha11_err]
 
         # hexagonal, trigonal, tetragonal space groups alpha33 also unique
         if space_group <= 194:
             unique_components_names.append("alpha3")
             unique_components_values.append(alpha33)
-            unique_components_errs.append(alpha33_err)
+            # unique_components_errs.append(alpha33_err)
 
         # orthorhombic, alpha22 also unique
         if space_group <= 74:
@@ -430,7 +430,7 @@ class TestDriver(SingleCrystalTestDriver):
             # into voigt notation order
             unique_components_names.insert(1,"alpha2")
             unique_components_values.insert(1,alpha22)
-            unique_components_errs.insert(1,alpha22_err)
+            # unique_components_errs.insert(1,alpha22_err)
 
         # monoclinic or triclinic, all components potentially unique
         if space_group <= 15:
@@ -443,9 +443,18 @@ class TestDriver(SingleCrystalTestDriver):
             unique_components_values.append(alpha13)
             unique_components_values.append(alpha12)
 
-            unique_components_errs.append(alpha23_err)
-            unique_components_errs.append(alpha13_err)
-            unique_components_errs.append(alpha12_err)
+            # unique_components_errs.append(alpha23_err)
+            # unique_components_errs.append(alpha13_err)
+            # unique_components_errs.append(alpha12_err)
+
+        """
+        Presently, errors are not reported because there isn't a good way to get
+        the initial uncertainty of the cell parameters. If we determine a good way to do that,
+        uncommenting the above lines involving 'unique_components_errs' and 'alphaij_err'
+        and replacing the TODO in helper_functions.compute_alpha_voigt() 
+        with the initial cell errors should be a drop-in addition, as the code is set up
+        to accept and report errors.
+        """
 
         # TODO: add uncertainty info once we decide how to calculate cell errors
         self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt_nonsymb, "1/K")
