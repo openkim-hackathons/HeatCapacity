@@ -592,7 +592,25 @@ def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.
         new_cell = new_cells[index]
 
         # calculate the deformation matrix from the old and new cells
+        # EXLANATION:
+        # Definition of deformation:
+        # x = F @ X, where X is a reference vector and x is the undeformed vector
+        # and F is the deformation gradient.
+        # Given 3 sets of X, x, we can solve for F. We can do this
+        # using the old and new unit cells. So c = F @ C, where C is the matrix with
+        # undeformed cell vectors as its columns, and c is the matrix with deformed
+        # cell vectors as its columns.
+        # However, ASE cells have the vectors as rows, not columns. So we
+        # transpose this equation to get C^T @ F^T = c^T, and can
+        # use np.linalg.solve with a = C^T, b = c^T to find F^T.
+        # Then, we must transpose F^T (actually F^T-I) to get F-I,
+        # because in eq. 2.9 of Wallace, we use u_ki*u_kj, or in matrix form,
+        # u^T @ u, where u are the components of F-I. For a nonsymmetric matrix,
+        # u^T @ u != u @ u^T, so this matters for the end result when the deformation
+        # is nonsymmetric (i.e. includes rotation). This happens in the standard
+        # orientations for monoclinic and triclinic cells.
         deformation = np.linalg.solve(center_cell,new_cell) - np.identity(dim)
+        deformation = deformation.T
 
         strain = np.empty((dim,dim))
 
