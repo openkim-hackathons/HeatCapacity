@@ -1,9 +1,20 @@
-import argparse
-import subprocess
-from kim_tools.test_driver.core import query_crystal_structures
 from test_driver.test_driver import TestDriver
+from ase.build import bulk
+
+atoms = bulk("Au")
+td=TestDriver("Sim_LAMMPS_ADP_StarikovGordeevLysogorskiy_2020_SiAuAl__SM_113843830602_000")
+print(td(
+        atoms,
+        temperature_K= 293.15,
+        repeat= (3, 3, 3),
+        lammps_command= "lmp",
+        max_workers= 3,
+))
 
 
+
+
+"""
 if __name__ == '__main__':
     # Argument parsing
     parser = argparse.ArgumentParser(description='Pass arguments to the KIM test driver')
@@ -34,3 +45,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Got exception {repr(e)}")
     test_driver.write_property_instances_to_file()
+"""

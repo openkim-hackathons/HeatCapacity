@@ -1,4 +1,4 @@
-python run.py -m EAM_Dynamo_ErcolessiAdams_1994_Al__MO_123629422045_005 -p A_cF4_225_a -s Al
+python run.py -m Sim_LAMMPS_ADP_StarikovGordeevLysogorskiy_2020_SiAuAl__SM_113843830602_000 -p A_cF4_225_a -s Au
 mv output output_A_cF4_225_a_Al_EAM_Dynamo_ErcolessiAdams_1994_Al__MO_123629422045_005
 python run.py -m Sim_LAMMPS_ReaxFF_BrugnoliMiyataniAkaji_SiCeNaClHO_2023__SM_282799919035_000 -p AB2_cF12_225_a_c -s Ce O
 mv output output_AB2_cF12_225_a_c_Ce_O_Sim_LAMMPS_ReaxFF_BrugnoliMiyataniAkaji_SiCeNaClHO_2023__SM_282799919035_000
