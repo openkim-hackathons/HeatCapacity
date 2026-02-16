@@ -8,7 +8,6 @@
     "tag:staff@noreply.openkim.org,2026-02-09:property/thermal-expansion-coefficient-tensor-npt"
     "tag:staff@noreply.openkim.org,2026-02-09:property/volume-thermal-expansion-coefficient-crystal-npt"
   ]
-    "tag:staff@noreply.openkim.org,2024-03-11:property/heat-capacity-npt" "tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt"]
   "publication-year" "2026"
   "simulator-name" "LAMMPS"
   "title" "Heat Capacity and Thermal Expansion Tensor at constant pressure v000"
