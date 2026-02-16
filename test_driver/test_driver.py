@@ -362,9 +362,9 @@ class TestDriver(SingleCrystalTestDriver):
             disclaimer = None
 
         self._add_property_instance_and_common_crystal_genome_keys(
-            "heat-capacity-npt", write_stress=True, write_temp=middle_temperature, disclaimer=disclaimer)
+            "heat-capacity-crystal-npt", write_stress=True, write_temp=middle_temperature, disclaimer=disclaimer)
         self._add_key_to_current_property_instance(
-            "constant-pressure-heat-capacity-per-atom", constant_pressure_heat_capacity / number_atoms,
+            "heat-capacity-per-atom", constant_pressure_heat_capacity / number_atoms,
             "eV/K",
             uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_atoms})
 
@@ -372,14 +372,14 @@ class TestDriver(SingleCrystalTestDriver):
         assert number_atoms % number_atoms_in_formula == 0
         number_formula = number_atoms // number_atoms_in_formula
         self._add_key_to_current_property_instance(
-            "constant-pressure-heat-capacity-per-formula", constant_pressure_heat_capacity / number_formula,
+            "heat-capacity-per-formula", constant_pressure_heat_capacity / number_formula,
             "eV/K",
             uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_formula})
 
         total_mass_g_per_mol = sum(atoms_new.get_masses())
         self._add_key_to_current_property_instance(
-            "constant-pressure-specific-heat-capacity", constant_pressure_heat_capacity / total_mass_g_per_mol,
-            "eV/K/(g/mol)",
+            "specific-heat-capacity", constant_pressure_heat_capacity / total_mass_g_per_mol,
+            "eV/K/amu",
             uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / total_mass_g_per_mol})
 
         alpha11 = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][0]
@@ -397,7 +397,7 @@ class TestDriver(SingleCrystalTestDriver):
         # alpha12_err = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][1]
 
         # property can be referred to with or without tags
-        self._add_property_instance_and_common_crystal_genome_keys("tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt",
+        self._add_property_instance_and_common_crystal_genome_keys("thermal-expansion-coefficient-tensor-npt",
                                                                    write_stress=True, write_temp=True)
         space_group = int(self.prototype_label.split("_")[2])
 
@@ -457,7 +457,13 @@ class TestDriver(SingleCrystalTestDriver):
         """
 
         # TODO: add uncertainty info once we decide how to calculate cell errors
-        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt", alpha_final_voigt_nonsymb, "1/K")
-        self._add_key_to_current_property_instance("thermal-expansion-tensor-voigt-symmetry-reduced", alpha_final_voigt_sym,"1/K")
-        self._add_key_to_current_property_instance("unique-components-names",unique_components_names)
-        self._add_key_to_current_property_instance("unique-components-values",unique_components_values,"1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-voigt-raw", alpha_final_voigt_nonsymb, "1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-voigt", alpha_final_voigt_sym,"1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-coefficient-names",unique_components_names)
+        self._add_key_to_current_property_instance("thermal-expansion-coefficient-values",unique_components_values,"1/K")
+
+        self._add_property_instance_and_common_crystal_genome_keys("volume-thermal-expansion-coefficient-crystal-npt",
+                                                                   write_stress=True, write_temp=True)
+        # Wallace, Thermodynamics of Crystals eq. 2.75
+        self._add_key_to_current_property_instance(
+            "volume-thermal-expansion-coefficient", alpha11 + alpha22 + alpha33, "1/K")

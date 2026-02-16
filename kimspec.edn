@@ -1,10 +1,15 @@
 {
-  "description" "Computes heat capacity and thermal expansion tensor at finite temperature and constant pressure for a range of materials."
+  "description" "Computes heat capacity and thermal expansion at finite temperature and constant pressure for an arbitrary crystal using finite differences. The crystal structure is specified using the AFLOW prototype designation as part of the Crystal Genome testing framework."
   "domain" "openkim.org"
   "executables" ["runner" "test_template/runner"]
   "kim-api-version" "2.4"
-  "properties" ["tag:staff@noreply.openkim.org,2024-03-11:property/heat-capacity-npt" "tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt"]
-  "publication-year" "2025"
+  "properties" [
+    "tag:staff@noreply.openkim.org,2026-02-09:property/heat-capacity-crystal-npt"
+    "tag:staff@noreply.openkim.org,2026-02-09:property/thermal-expansion-coefficient-tensor-npt"
+    "tag:staff@noreply.openkim.org,2026-02-09:property/volume-thermal-expansion-coefficient-crystal-npt"
+  ]
+    "tag:staff@noreply.openkim.org,2024-03-11:property/heat-capacity-npt" "tag:staff@noreply.openkim.org,2024-03-11:property/thermal-expansion-coefficient-npt"]
+  "publication-year" "2026"
   "simulator-name" "LAMMPS"
   "title" "Heat Capacity and Thermal Expansion Tensor at constant pressure v000"
 }
