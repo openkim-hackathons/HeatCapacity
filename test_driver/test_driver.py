@@ -1,61 +1,196 @@
 from concurrent.futures import as_completed, ProcessPoolExecutor
 import os
+import random
 import shutil
-import subprocess
-from typing import Optional, Tuple
-from ase.io.lammpsdata import write_lammps_data
+from typing import Optional, Sequence
+from ase.calculators.lammps import convert, Prism
 import numpy as np
-from kim_tools import query_crystal_genome_structures
-from kim_tools.test_driver import CrystalGenomeTestDriver
-from helper_functions import (check_lammps_log_for_wrong_structure_format, compute_alpha, compute_heat_capacity,
-                               get_cell_from_averaged_lammps_dump, get_positions_from_averaged_lammps_dump,
-                               reduce_and_avg, run_lammps)
+from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
+from kim_tools.symmetry_util.core import (reduce_and_avg, PeriodExtensionException,
+                                           fit_voigt_tensor_to_cell_and_space_group,)
+from kim_tools.test_driver import SingleCrystalTestDriver
+from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
+                               get_positions_from_averaged_lammps_dump, run_lammps)
 
 
-class HeatCapacity(CrystalGenomeTestDriver):
-    def _calculate(self, temperature: float, pressure: float, temperature_step_fraction: float,
-                   number_symmetric_temperature_steps: int, timestep: float, number_sampling_timesteps: int,
-                   repeat: Tuple[int, int, int] = (3, 3, 3), loose_triclinic_and_monoclinic=False,
-                   max_workers: Optional[int] = None, **kwargs) -> None:
+class TestDriver(SingleCrystalTestDriver):
+    def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
+                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
+                   max_workers: Optional[int] = None, lammps_command = "lmp",
+                   msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
+                   random_seeds: Optional[Sequence[int]] = (1, 2, 3), **kwargs) -> None:
         """
-        Compute constant-pressure heat capacity from centered finite difference (see Section 3.2 in
-        https://pubs.acs.org/doi/10.1021/jp909762j).
+        Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
+        derivatives.
 
-        structure_index:
-            KIM tests can loop over multiple structures (i.e. crystals, molecules, etc.).
-            This indicates which is being used for the current calculation.
+        Section 3.2 in https://pubs.acs.org/doi/10.1021/jp909762j argues that the centered finite-difference approach
+        is more accurate than fluctuation-based approaches for computing heat capacities from molecular-dynamics
+        simulations.
 
-        temperature:
-            Temperature in Kelvin at which the heat capacity at constant pressure is estimated. Must be strictly greater
-            than zero.
+        The finite-difference approach requires to run at least three molecular-dynamics simulations with a fixed number
+        of atoms N at constant pressure (P) and at different constant temperatures T (NPT ensemble), one at the target
+        temperature at which the heat capacity and thermal expansion tensor are to be estimated, one at a slightly lower
+        temperature, and one at a slightly higher temperature. It is possible to add more temperature points
+        symmetrically around the target temperature for higher-order finite-difference schemes.
 
-        pressure:
-            Pressure in bar of the NPT simulation for the initial equilibration of the
-            zero-temperature configuration. Must be strictly greater than zero.
+        This test driver repeats the unit cell of the zero-temperature crystal structure to build a supercell and then
+        runs molecular-dynamics simulations in the NPT ensemble using Lammps.
 
-        # TODO: Document arguments and add sensible default values.
+        This test driver uses kim_convergence to detect equilibrated molecular-dynamics simulations. It checks for the
+        convergence of the volume, temperature, enthalpy and cell shape parameters every 10000 timesteps.
+
+        After the molecular-dynamics simulations, the symmetry of the average structures during the equilbrated parts of
+        the runs are checked to ensure that they did not change in comparison to the initial structure. Also, it is
+        ensured that replicated atoms in replicated unit atoms are not too far away from the average atomic positions.
+
+        The crystals might melt or vaporize during the simulations. In that case, kim-convergence would only detect
+        equilibration after unnecessarily long simulations. Therefore, this test driver initially check for melting or
+        vaporization during short initial simulations. During these initial runs, the mean-squared displacement (MSD) of
+        atoms during the simulations is monitored. If the MSD exceeds a given threshold value, an error is raised.
+
+        All output files are written to the "output" directory.
+
+        :param temperature_step_fraction:
+            Fraction of the target temperature that is used as temperature step for the finite-difference scheme.
+            For example, if the target temperature is 300 K and the temperature_step_fraction is 0.1, the temperature
+            difference between the different NPT simulations will be 30 K.
+            Should be bigger than zero and smaller than one divided by number_symmetric_temperature_steps (to avoid
+            simulations at negative temperatures).
+            Default is 0.01 (1% of the target temperature).
+            Should be bigger than zero and smaller than one.
+        :type temperature_step_fraction: float
+        :param number_symmetric_temperature_steps:
+            Number of symmetric temperature steps around the target temperature to use for the finite-difference
+            scheme.
+            For example, if number_symmetric_temperature_steps is 2, five NPT simulations will be run at temperatures
+            T - 2*delta_T, T - delta_T, T, T + delta_T, T + 2*delta_T, where delta_T is determined by
+            temperature_step_fraction * T.
+            Default is 1.
+            Should be bigger than zero.
+        :type number_symmetric_temperature_steps: int
+        :param timestep_ps:
+            Time step in picoseconds.
+            Default is 0.001 ps (1 fs).
+            Should be bigger than zero.
+        :type timestep_ps: float
+        :param number_sampling_timesteps:
+            Sample thermodynamic variables every number_sampling_timesteps timesteps in Lammps.
+            Default is 100 timesteps.
+            Should be bigger than zero.
+        :type number_sampling_timesteps: int
+        :param repeat:
+            Tuple of three integers specifying how often to repeat the unit cell in each direction to build the
+            supercell.
+            If (0, 0, 0) is given, a supercell size close to 10,000 atoms is chosen.
+            Default is (0, 0, 0).
+            All entries have to be bigger than zero.
+        :type repeat: Sequence[int]
+        :param max_workers:
+            Maximum number of parallel workers to use for running Lammps simulations at different temperatures.
+            If None is given, this will be set to 1.
+            This is independent of the number of processors used by each Lammps simulation that can be specified in the
+            lammps command itself.
+            Default is None.
+        :type max_workers: Optional[int]
+        :param lammps_command:
+            Command to run Lammps.
+            Default is "lmp".
+        :type lammps_command: str
+        :param msd_threshold_angstrom_squared_per_hundred_timesteps:
+            Mean-squared displacement threshold in Angstroms^2 per 100*timestep to detect melting or vaporization.
+            Default is 0.1.
+            Should be bigger than zero.
+        :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
+        :param random_seeds:
+            Random seeds for the Lammps simulations.
+            This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
+            temperatures being simulated.
+            If None is given, random seeds will be sampled.
+            Default is (1, 2, 3).
+            Each seed should be bigger than zero.
+        :type random_seeds: Optional[Sequence[int]]
+
+        :raises ValueError:
+            If any of the input arguments are invalid.
+        :raises KIMTestDriverError:
+            If the crystal melts or vaporizes during the simulation.
+            If the symmetry of the structure changes.
+            If the output directory "output" does not exist.
         """
+        # Set prototype label.
+        self.prototype_label = self._get_nominal_crystal_structure_npt()["prototype-label"]["source-value"]
+
+        # Get temperature in Kelvin.
+        temperature_K = self._get_temperature(unit="K")
+
+        # Get cauchy stress tensor in bar.
+        cell_cauchy_stress_bar = self._get_cell_cauchy_stress(unit="bar")
+
         # Check arguments.
-        if not temperature > 0.0:
-            raise RuntimeError("Temperature has to be larger than zero.")
+        if not temperature_K > 0.0:
+            raise ValueError("Temperature has to be larger than zero.")
 
-        if not pressure > 0.0:
-            raise RuntimeError("Pressure has to be larger than zero.")
+        if not len(cell_cauchy_stress_bar) == 6:
+            raise ValueError("Specify all six (x, y, z, xy, xz, yz) entries of the cauchy stress tensor.")
+
+        if not (cell_cauchy_stress_bar[0] == cell_cauchy_stress_bar[1] == cell_cauchy_stress_bar[2]):
+            raise ValueError("The diagonal entries of the stress tensor have to be equal so that a hydrostatic "
+                             "pressure is used.")
+
+        if not (cell_cauchy_stress_bar[3] == cell_cauchy_stress_bar[4] == cell_cauchy_stress_bar[5] == 0.0):
+            raise ValueError("The off-diagonal entries of the stress tensor have to be zero so that a hydrostatic "
+                             "pressure is used.")
+
+        if not timestep_ps > 0.0:
+            raise ValueError("Timestep has to be larger than zero.")
+
+        if not 0.0 < temperature_step_fraction < 1.0:
+            raise ValueError("Temperature-step fraction has to be bigger than zero and smaller than one.")
 
         if not number_symmetric_temperature_steps > 0:
-            raise RuntimeError("Number of symmetric temperature steps has to be bigger than zero.")
+            raise ValueError("Number of symmetric temperature steps has to be bigger than zero.")
 
         if number_symmetric_temperature_steps * temperature_step_fraction >= 1.0:
-            raise RuntimeError(
+            raise ValueError(
                 "The given number of symmetric temperature steps and the given temperature-step fraction "
                 "would yield zero or negative temperatures.")
-        # TODO: Check all arguments.
 
-        # Copy original atoms so that their information does not get lost when the new atoms are modified.
-        atoms_new = self.atoms.copy()
+        if not number_sampling_timesteps > 0:
+            raise ValueError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
 
-        # UNCOMMENT THIS TO TEST A TRICLINIC STRUCTURE!
-        # atoms_new = bulk('Ar', 'fcc', a=5.248)
+        if not len(repeat) == 3:
+            raise ValueError("The repeat argument has to be a tuple of three integers.")
+
+        if not all(r >= 0 for r in repeat):
+            raise ValueError("All number of repeats must be bigger than zero.")
+
+        if max_workers is not None:
+            if not max_workers > 0:
+                raise ValueError("Maximum number of workers has to be bigger than zero.")
+        else:
+            max_workers = 1
+        
+        if not msd_threshold_angstrom_squared_per_hundred_timesteps > 0.0:
+            raise ValueError("The mean-squared displacement threshold has to be bigger than zero.")
+
+        if random_seeds is not None:
+            if len(random_seeds) != 2 * number_symmetric_temperature_steps + 1:
+                raise ValueError("If random seeds are given, their number has to match the number of temperatures "
+                                 "being simulated.")
+            if not all(rs > 0 for rs in random_seeds):
+                raise ValueError("All random seeds must be bigger than zero.")
+        else:
+            # Get random 31-bit unsigned integers.
+            random_seeds = [random.getrandbits(31) for _ in range(2 * number_symmetric_temperature_steps + 1)]
+
+        # Get pressure from cauchy stress tensor.
+        pressure_bar = -cell_cauchy_stress_bar[0]
+
+         # Copy original atoms so that their information does not get lost.
+        original_atoms = self._get_atoms()
+
+        # Create atoms object that will contain the supercell.
+        atoms_new = original_atoms.copy()
 
         # This is how ASE obtains the species that are written to the initial configuration.
         # These species are passed to kim interactions.
@@ -64,51 +199,67 @@ class HeatCapacity(CrystalGenomeTestDriver):
         species = sorted(set(symbols))
 
         # Build supercell.
+        if repeat == (0, 0, 0):
+            # Get a size close to 10K atoms (shown to give good convergence)
+            x = int(np.ceil(np.cbrt(10000 / len(atoms_new))))
+            repeat = (x, x, x)
+
         atoms_new = atoms_new.repeat(repeat)
 
         # Get temperatures that should be simulated.
-        temperature_step = temperature_step_fraction * temperature
-        temperatures = [temperature + i * temperature_step
+        temperature_step = temperature_step_fraction * temperature_K
+        temperatures = [temperature_K + i * temperature_step
                         for i in range(-number_symmetric_temperature_steps, number_symmetric_temperature_steps + 1)]
         assert len(temperatures) == 2 * number_symmetric_temperature_steps + 1
         assert all(t > 0.0 for t in temperatures)
 
-        # Write lammps file.
-        TDdirectory = os.path.dirname(os.path.realpath(__file__))
-        structure_file = os.path.join(TDdirectory, "output/zero_temperature_crystal.lmp")
-        atoms_new.write(structure_file, format="lammps-data", masses=True)
-        # Handle cases where kim models expect different structure file formats.
-        try:
-            run_lammps(self.kim_model_name, 0, temperatures[0], pressure, timestep,
-                       number_sampling_timesteps, species, test_file_read=True)
-        except subprocess.CalledProcessError as e:
-            filename = "output/lammps_temperature_0.log"
-            log_file = os.path.join(TDdirectory, filename)
-            wrong_format_error = check_lammps_log_for_wrong_structure_format(log_file)
-
-            if wrong_format_error:
-                # write the atom configuration file in the in the 'charge' format some models expect
-                write_lammps_data(structure_file, atoms_new, atom_style="charge", masses=True)
-                # try to read the file again, raise any exeptions that might happen
-                run_lammps(self.kim_model_name, 0, temperatures[0], pressure, timestep,
-                           number_sampling_timesteps, species, test_file_read=True)
-
-            else:
-                raise e
-
+        # Make sure output directory for all data files exists and copy over necessary files.
+        if not os.path.exists("output"):
+            raise KIMTestDriverError("Output directory 'output' does not exist.")
+        test_driver_directory = os.path.dirname(os.path.realpath(__file__))
+        if os.getcwd() != test_driver_directory:
+            shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), "npt.lammps")
+            shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"), "run_length_control.py")
         # Choose the correct accuracies file for kim-convergence based on whether the cell is orthogonal or not.
-        if atoms_new.get_cell().orthorhombic:
-            shutil.copyfile("accuracies_orthogonal.py", "accuracies.py")
-        else:
-            shutil.copyfile("accuracies_non_orthogonal.py", "accuracies.py")
+        with open("accuracies.py", "w") as file:
+            print("""from typing import Optional, Sequence
+
+# A relative half-width requirement or the accuracy parameter. Target value
+# for the ratio of halfwidth to sample mean. If n_variables > 1,
+# relative_accuracy can be a scalar to be used for all variables or a 1darray
+# of values of size n_variables.
+# For cells, we can only use a relative accuracy for all non-zero variables.
+# The last three variables, however, correspond to the tilt factors of the orthogonal cell (see npt.lammps which are
+# expected to fluctuate around zero. For these, we should use an absolute accuracy instead.""", file=file)
+            relative_accuracies = ["0.01", "0.01", "0.01", "0.01", "0.01", "0.01", "0.01", "0.01", "0.01"]
+            absolute_accuracies = ["None", "None", "None", "None", "None", "None", "None", "None", "None"]
+            _, _, _, xy, xz, yz = convert(Prism(atoms_new.get_cell()).get_lammps_prism(), "distance",
+                                          "ASE", "metal")
+            if abs(xy) < 1.0e-6:
+                relative_accuracies[6] = "None"
+                absolute_accuracies[6] = "0.01"
+            if abs(xz) < 1.0e-6:
+                relative_accuracies[7] = "None"
+                absolute_accuracies[7] = "0.01"
+            if abs(yz) < 1.0e-6:
+                relative_accuracies[8] = "None"
+                absolute_accuracies[8] = "0.01"
+            print(f"RELATIVE_ACCURACY: Sequence[Optional[float]] = [{', '.join(relative_accuracies)}]", file=file)
+            print(f"ABSOLUTE_ACCURACY: Sequence[Optional[float]] = [{', '.join(absolute_accuracies)}]", file=file)
+
+        # Write lammps file.
+        structure_file = "output/zero_temperature_crystal.lmp"
+        atom_style = self._get_supported_lammps_atom_style()
+        atoms_new.write(structure_file, format="lammps-data", masses=True, units="metal", atom_style=atom_style)
 
         # Run Lammps simulations in parallel.
+        assert len(temperatures) == len(random_seeds)
         futures = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            for i, t in enumerate(temperatures):
+            for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
-                    run_lammps, self.kim_model_name, i, t, pressure, timestep,
-                    number_sampling_timesteps, species))
+                    run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
+                    species, msd_threshold_angstrom_squared_per_hundred_timesteps, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
@@ -121,24 +272,67 @@ class HeatCapacity(CrystalGenomeTestDriver):
 
         # Collect results and check that symmetry is unchanged after all simulations.
         log_filenames = []
-        restart_filenames = []
-        for future, t in zip(futures, temperatures):
+        all_cells = []
+        middle_temperature_atoms = None
+        middle_temperature = None
+        for t_index, (future, t) in enumerate(zip(futures, temperatures)):
             assert future.done()
             assert future.exception() is None
-            log_filename, restart_filename, average_position_filename, average_cell_filename = future.result()
+            (log_filename, restart_filename, average_position_filename, average_cell_filename,
+             melted_crystal_filename) = future.result()
             log_filenames.append(log_filename)
-            restart_filenames.append(restart_filename)
-            restart_filenames.append(restart_filename)
+
+            # Check that crystal did not melt or vaporize.
+            with open(log_filename, "r") as f:
+                for line in f:
+                    if line.startswith("Crystal melted or vaporized"):
+                        assert os.path.exists(melted_crystal_filename)
+                        raise KIMTestDriverError(f"Crystal melted or vaporized during simulation at temperature {t} K.")
+            assert not os.path.exists(melted_crystal_filename)
+
+            # Process results and check that symmetry is unchanged after simulation.
             atoms_new.set_cell(get_cell_from_averaged_lammps_dump(average_cell_filename))
             atoms_new.set_scaled_positions(
                 get_positions_from_averaged_lammps_dump(average_position_filename))
-            reduced_atoms = reduce_and_avg(atoms_new, repeat)
-            crystal_genome_designation = self._get_crystal_genome_designation_from_atoms_and_verify_unchanged_symmetry(
-                reduced_atoms, loose_triclinic_and_monoclinic=loose_triclinic_and_monoclinic)
+            try:
+                reduced_atoms = reduce_and_avg(atoms_new, repeat)
+            except PeriodExtensionException as e:
+                atoms_new.write(f"output/final_configuration_temperature_{t_index}_failing.poscar",
+                                format="vasp", sort=True)
+                raise KIMTestDriverError(f"Could not reduce structure after NPT simulation at "
+                                         f"temperature {t} K (temperature index {t_index}): {e}")
+
+            if t_index == number_symmetric_temperature_steps:
+                # Store the atoms of the middle temperature for later because their crystal genome designation 
+                # will be used for the heat-capacity and thermal expansion properties.
+                middle_temperature_atoms = reduced_atoms.copy()
+                middle_temperature = t
+            
+            # Check that the symmetry of the structure did not change.
+            if not self._verify_unchanged_symmetry(reduced_atoms):
+                reduced_atoms.write(f"output/reduced_atoms_temperature_{t_index}_failing.poscar",
+                                    format="vasp", sort=True)
+                raise KIMTestDriverError(f"Symmetry of structure changed during simulation at temperature {t} K.")
+            
+            # Write NPT crystal structures.
+            self._update_nominal_parameter_values(reduced_atoms)
+            # since we're looping over the futures, one per temperature
+            # calling this will append the current cell, one per temperature, 
+            # into an array for later use
+            all_cells.append(self._get_atoms().cell)
+            self._add_property_instance_and_common_crystal_genome_keys("crystal-structure-npt", write_stress=True,
+                                                                       write_temp=t)
+            self._add_file_to_current_property_instance("restart-file", restart_filename)
+            
+            # Reset to original atoms.
+            self._update_nominal_parameter_values(original_atoms)
+
+        assert middle_temperature_atoms is not None
+        assert middle_temperature is not None
 
         c = compute_heat_capacity(temperatures, log_filenames, 2)
+        alpha = compute_alpha_tensor(all_cells, temperatures)
 
-        alpha = compute_alpha(log_filenames, temperatures, crystal_genome_designation["prototype_label"])
         # Print result.
         print('####################################')
         print('# NPT Heat Capacity Results #')
@@ -149,69 +343,127 @@ class HeatCapacity(CrystalGenomeTestDriver):
         print('####################################')
         print(f'alpha:\t{alpha}')
 
-        # TODO: We should write some coordinate file.
-        self.poscar = None
-
         # Write property.
-        self._add_property_instance_and_common_crystal_genome_keys(
-            "heat-capacity-npt", write_stress=True, write_temp=True)  # last two default to False
-        self._add_key_to_current_property_instance(
-            "constant_pressure_heat_capacity", c["finite_difference_accuracy_2"][0], "eV/Kelvin",
-            uncertainty_info={"source-std-uncert-value": c["finite_difference_accuracy_2"][1]})
-
         max_accuracy = len(temperatures) - 1
-        alpha11 = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha11_err = alpha[0][0][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha12 = alpha[0][1][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha12_err = alpha[0][1][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha13 = alpha[0][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha13_err = alpha[0][2][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha22 = alpha[1][1][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha22_err = alpha[1][1][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha23 = alpha[1][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha23_err = alpha[1][2][f"finite_difference_accuracy_{max_accuracy}"][1]
-        alpha33 = alpha[2][2][f"finite_difference_accuracy_{max_accuracy}"][0]
-        alpha33_err = alpha[2][2][f"finite_difference_accuracy_{max_accuracy}"][1]
+        assert len(atoms_new) == len(original_atoms) * repeat[0] * repeat[1] * repeat[2]
+        number_atoms = len(atoms_new)
+        self._update_nominal_parameter_values(middle_temperature_atoms)
+        constant_pressure_heat_capacity = c[f"finite_difference_accuracy_{max_accuracy}"][0]
+        constant_pressure_heat_capacity_uncert = c[f"finite_difference_accuracy_{max_accuracy}"][1]
+        # If relative uncertainty is too high, print a disclaimer.
+        relative_uncertainty = constant_pressure_heat_capacity_uncert / abs(constant_pressure_heat_capacity)
+        if relative_uncertainty > 0.1:
+            disclaimer = (
+                f"The relative uncertainty {relative_uncertainty} of the constant-pressure heat capacity is larger than "
+                f"10%. Consider changing the temperature_step_fraction, number_symmetric_temperature_steps and repeat"
+                f"arguments to improve results.\nSee stdout and logs for calculation details."
+            )
+        else:
+            disclaimer = None
 
-        # enforce tensor symmetries
-        alpha21 = alpha12
-        alpha31 = alpha13
-        alpha32 = alpha23
+        self._add_property_instance_and_common_crystal_genome_keys(
+            "heat-capacity-crystal-npt", write_stress=True, write_temp=middle_temperature, disclaimer=disclaimer)
+        self._add_key_to_current_property_instance(
+            "heat-capacity-per-atom", constant_pressure_heat_capacity / number_atoms,
+            "eV/K",
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_atoms})
 
-        alpha21_err = alpha12_err
-        alpha31_err = alpha13_err
-        alpha32_err = alpha23_err
+        number_atoms_in_formula = sum(get_stoich_reduced_list_from_prototype(self.prototype_label))
+        assert number_atoms % number_atoms_in_formula == 0
+        number_formula = number_atoms // number_atoms_in_formula
+        self._add_key_to_current_property_instance(
+            "heat-capacity-per-formula", constant_pressure_heat_capacity / number_formula,
+            "eV/K",
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / number_formula})
 
-        alpha_final = np.asarray([[alpha11, alpha12, alpha13],
-                                  [alpha21, alpha22, alpha23],
-                                  [alpha31, alpha32, alpha33]])
+        total_mass_g_per_mol = sum(atoms_new.get_masses())
+        self._add_key_to_current_property_instance(
+            "specific-heat-capacity", constant_pressure_heat_capacity / total_mass_g_per_mol,
+            "eV/K/amu",
+            uncertainty_info={"source-std-uncert-value": constant_pressure_heat_capacity_uncert / total_mass_g_per_mol})
 
-        alpha_final_err = np.asarray([[alpha11_err, alpha12_err, alpha13_err],
-                                      [alpha21_err, alpha22_err, alpha23_err],
-                                      [alpha31_err, alpha32_err, alpha33_err]])
+        alpha11 = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha22 = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha33 = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha23 = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha13 = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][0]
+        alpha12 = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][0]
 
-        self._add_property_instance_and_common_crystal_genome_keys("thermal-expansion-coefficient-npt",
+        # alpha11_err = alpha[0][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha22_err = alpha[1][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha33_err = alpha[2][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha23_err = alpha[3][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha13_err = alpha[4][f"finite_difference_accuracy_{max_accuracy}"][1]
+        # alpha12_err = alpha[5][f"finite_difference_accuracy_{max_accuracy}"][1]
+
+        # property can be referred to with or without tags
+        self._add_property_instance_and_common_crystal_genome_keys("thermal-expansion-coefficient-tensor-npt",
                                                                    write_stress=True, write_temp=True)
-        self._add_key_to_current_property_instance("alpha11", alpha11, "1/K", uncertainty_info={"source-std-uncert-value":alpha11_err})
-        self._add_key_to_current_property_instance("alpha22", alpha22, "1/K", uncertainty_info={"source-std-uncert-value":alpha22_err})
-        self._add_key_to_current_property_instance("alpha33", alpha33, "1/K", uncertainty_info={"source-std-uncert-value":alpha33_err})
-        self._add_key_to_current_property_instance("alpha12", alpha12, "1/K", uncertainty_info={"source-std-uncert-value":alpha12_err})
-        self._add_key_to_current_property_instance("alpha13", alpha13, "1/K", uncertainty_info={"source-std-uncert-value":alpha13_err})
-        self._add_key_to_current_property_instance("alpha23", alpha23, "1/K", uncertainty_info={"source-std-uncert-value":alpha23_err})
-        self._add_key_to_current_property_instance("thermal-expansion-coefficient", alpha_final, "1/K", uncertainty_info={"source-std-uncert-value":alpha_final_err})
+        space_group = int(self.prototype_label.split("_")[2])
 
-        self.write_property_instances_to_file()
-        print(c) 
+        # thermal expansion tensor in voigt notation
+        alpha_final_voigt_nonsymb = np.asarray([alpha11,alpha22,alpha33,alpha23,alpha13,alpha12])
 
-if __name__ == "__main__":
-    # model_name = "LJ_Shifted_Bernardes_1958MedCutoff_Ar__MO_126566794224_004"
-    model_name = "EAM_Dynamo_ErcolessiAdams_1994_Al__MO_123629422045_005"
-    subprocess.run(f"kimitems install {model_name}", shell=True, check=True)
-    test_driver = HeatCapacity(model_name)
-    list_of_queried_structures = query_crystal_genome_structures(kim_model_name=model_name,
-                                                                 stoichiometric_species=['Al'],
-                                                                 prototype_label='A_cF4_225_a')
-    for queried_structure in list_of_queried_structures:
-        test_driver(**queried_structure, temperature=293.15, pressure=1.0, temperature_step_fraction=0.01,
-                    number_symmetric_temperature_steps=2, timestep=0.001, number_sampling_timesteps=100,
-                    repeat=(3, 3, 3), loose_triclinic_and_monoclinic=True, max_workers=5)
+        # TODO: upgrade to fit_voigt_tensor_and_error_to_cell_and_space_group()
+        # once errors are being calculated
+        center_cell = all_cells[int(np.floor(len(all_cells)/2))]
+        
+        alpha_final_voigt_sym = fit_voigt_tensor_to_cell_and_space_group(alpha_final_voigt_nonsymb,
+                                                                         center_cell,
+                                                                         space_group)
+        
+        # alpha11 unique for all space groups
+        unique_components_names = ["alpha1"]
+        unique_components_values = [alpha11]
+        # unique_components_errs = [alpha11_err]
+
+        # hexagonal, trigonal, tetragonal space groups alpha33 also unique
+        if space_group <= 194:
+            unique_components_names.append("alpha3")
+            unique_components_values.append(alpha33)
+            # unique_components_errs.append(alpha33_err)
+
+        # orthorhombic, alpha22 also unique
+        if space_group <= 74:
+
+            # insert alpha22 in the middle so they end up sorted
+            # into voigt notation order
+            unique_components_names.insert(1,"alpha2")
+            unique_components_values.insert(1,alpha22)
+            # unique_components_errs.insert(1,alpha22_err)
+
+        # monoclinic or triclinic, all components potentially unique
+        if space_group <= 15:
+
+            unique_components_names.append("alpha4")
+            unique_components_names.append("alpha5")
+            unique_components_names.append("alpha6")
+
+            unique_components_values.append(alpha23)
+            unique_components_values.append(alpha13)
+            unique_components_values.append(alpha12)
+
+            # unique_components_errs.append(alpha23_err)
+            # unique_components_errs.append(alpha13_err)
+            # unique_components_errs.append(alpha12_err)
+
+        """
+        Presently, errors are not reported because there isn't a good way to get
+        the initial uncertainty of the cell parameters. If we determine a good way to do that,
+        uncommenting the above lines involving 'unique_components_errs' and 'alphaij_err'
+        and replacing the TODO in helper_functions.compute_alpha_voigt() 
+        with the initial cell errors should be a drop-in addition, as the code is set up
+        to accept and report errors.
+        """
+
+        # TODO: add uncertainty info once we decide how to calculate cell errors
+        self._add_key_to_current_property_instance("thermal-expansion-voigt-raw", alpha_final_voigt_nonsymb, "1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-voigt", alpha_final_voigt_sym,"1/K")
+        self._add_key_to_current_property_instance("thermal-expansion-coefficient-names",unique_components_names)
+        self._add_key_to_current_property_instance("thermal-expansion-coefficient-values",unique_components_values,"1/K")
+
+        self._add_property_instance_and_common_crystal_genome_keys("volume-thermal-expansion-coefficient-crystal-npt",
+                                                                   write_stress=True, write_temp=True)
+        # Wallace, Thermodynamics of Crystals eq. 2.75
+        self._add_key_to_current_property_instance(
+            "volume-thermal-expansion-coefficient", alpha11 + alpha22 + alpha33, "1/K")

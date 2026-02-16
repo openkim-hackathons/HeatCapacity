@@ -1,11 +1,10 @@
 import copy
 from math import ceil, sqrt
 import os
-import random
 import re
 import subprocess
 from typing import Dict, Iterable, List, Tuple
-from ase import Atoms
+from ase.cell import Cell
 import findiff
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,72 +12,122 @@ import numpy.typing as npt
 import scipy.optimize
 
 
-def run_lammps(modelname: str, temperature_index: int, temperature: float, pressure: float, timestep: float,
-               number_sampling_timesteps: int, species: List[str], test_file_read=False) -> Tuple[str, str, str, str]:
-    # Get random 31-bit unsigned integer.
-    seed = random.getrandbits(31)
+def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
+               number_sampling_timesteps: int, species: List[str],
+               msd_threshold_angstrom_squared_per_hundred_timesteps: float, lammps_command: str,
+               random_seed: int) -> Tuple[str, str, str, str, str]:
+    """
+    Run LAMMPS NPT simulation with the given parameters.
 
-    pdamp = timestep * 100.0
-    tdamp = timestep * 1000.0
+    After the simulation, this function plots the thermodynamic properties (volume, temperature, enthalpy).
+
+    This function also processes the LAMMPS log file to extract equilibration information based on kim_convergence.
+    It then computes the average atomic positions and cell parameters during the molecular-dynamics simulation, only
+    considering data after equilibration.
+
+    The given temperature_index is used to name the output files uniquely for each temperature in a temperature sweep.
+
+    :param modelname:
+        Name of the OpenKIM interatomic model.
+    :type modelname: str
+    :param temperature_index:
+        Index of the temperature in the temperature sweep.
+    :type temperature_index: int
+    :param temperature_K:
+        Target temperature in Kelvin.
+    :type temperature_K: float
+    :param pressure_bar:
+        Target pressure in bars.
+    :type pressure_bar: float
+    :param timestep_ps:
+        Timestep in picoseconds.
+    :type timestep_ps: float
+    :param number_sampling_timesteps:
+        Number of timesteps for sampling thermodynamic quantities.
+    :type number_sampling_timesteps: int
+    :param species:
+        List of chemical species in the system.
+    :type species: List[str]
+    :param msd_threshold_angstrom_squared_per_hundred_timesteps:
+        Mean squared displacement threshold for vaporization in Angstroms^2 per 100*timestep.
+    :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
+    :param lammps_command:
+        Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").
+    :type lammps_command: str
+    :param random_seed:
+        Random seed for velocity initialization.
+    :type random_seed: int
+
+    :return:
+        A tuple containing paths to the LAMMPS log file, restart file, full average position file, full average cell
+        file, and melted crystal dump file (only exists if crystal melted).
+    :rtype: Tuple[str, str, str, str, str]
+    """
+    pdamp = timestep_ps * 100.0
+    tdamp = timestep_ps * 1000.0
 
     log_filename = f"output/lammps_temperature_{temperature_index}.log"
     restart_filename = f"output/final_configuration_temperature_{temperature_index}.restart"
+    melted_crystal_filename = f"output/melted_crystal_temperature_{temperature_index}.dump"
     variables = {
         "modelname": modelname,
-        "temperature": temperature,
-        "temperature_seed": seed,
+        "temperature": temperature_K,
+        "temperature_seed": random_seed,
         "temperature_damping": tdamp,
-        "pressure": pressure,
+        "pressure": pressure_bar,
         "pressure_damping": pdamp,
-        "timestep": timestep,
+        "timestep": timestep_ps,
         "number_sampling_timesteps": number_sampling_timesteps,
         "species": " ".join(species),
         "average_position_filename": f"output/average_position_temperature_{temperature_index}.dump.*",
         "average_cell_filename": f"output/average_cell_temperature_{temperature_index}.dump",
-        "write_restart_filename": restart_filename
+        "write_restart_filename": restart_filename,
+        "trajectory_filename": f"output/trajectory_{temperature_index}.lammpstrj",
+        "msd_threshold": msd_threshold_angstrom_squared_per_hundred_timesteps,
+        "melted_crystal_output": melted_crystal_filename
     }
-    if test_file_read:
-        # do a minimal test to see if the model can read the structure file
-        command = (
-                "lammps "
-                + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
-                + f" -log {log_filename}"
-                + " -in file_read_test.lammps")
-        subprocess.run(command, check=True, shell=True)
-    else:
-        command = (
-                "lammps "
-                + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
-                + f" -log {log_filename}"
-                + " -in npt.lammps")
 
-        subprocess.run(command, check=True, shell=True)
+    command = (
+            f"{lammps_command} "
+            + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
+            + f" -log {log_filename}"
+            + " -in npt.lammps")
 
-        plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
+    subprocess.run(command, check=True, shell=True)
 
-        equilibration_time = extract_equilibration_step_from_logfile(log_filename)
-        # Round to next multiple of 10000.
-        equilibration_time = int(ceil(equilibration_time / 10000.0)) * 10000
+    plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
 
-        full_average_position_file = f"output/average_position_temperature_{temperature_index}.dump.full"
-        compute_average_positions_from_lammps_dump("output", f"average_position_temperature_{temperature_index}.dump",
-                                                   full_average_position_file, equilibration_time)
+    # 10000 offset from MSD detection during which kim_convergence was not used.
+    equilibration_time = extract_equilibration_step_from_logfile(log_filename) + 10000
+    # Round to next multiple of 10000.
+    equilibration_time = int(ceil(equilibration_time / 10000.0)) * 10000
 
-        full_average_cell_file = f"output/average_cell_temperature_{temperature_index}.dump.full"
-        compute_average_cell_from_lammps_dump(f"output/average_cell_temperature_{temperature_index}.dump",
-                                              full_average_cell_file, equilibration_time)
+    full_average_position_file = f"output/average_position_temperature_{temperature_index}.dump.full"
+    compute_average_positions_from_lammps_dump("output",
+                                               f"average_position_temperature_{temperature_index}.dump",
+                                               full_average_position_file, equilibration_time)
 
-        return log_filename, restart_filename, full_average_position_file, full_average_cell_file
+    full_average_cell_file = f"output/average_cell_temperature_{temperature_index}.dump.full"
+    compute_average_cell_from_lammps_dump(f"output/average_cell_temperature_{temperature_index}.dump",
+                                          full_average_cell_file, equilibration_time)
+
+    return log_filename, restart_filename, full_average_position_file, full_average_cell_file, melted_crystal_filename
 
 
 def plot_property_from_lammps_log(in_file_path: str, property_names: Iterable[str]) -> None:
     """
-    The function to get the value of the property with time from ***.log
-    the extracted data are stored as ***.csv and ploted as property_name.png
-    data_dir --- the directory contains lammps_equilibration.log
-    property_names --- the list of properties
-    """
+    Extract and plot thermodynamic properties from the given Lammps log file.
 
+    The extracted data is stored in a csv file with the same name as the log file but with a .csv extension.
+    The plots of the specified properties against time are saved as property_name.png files.
+
+    :param in_file_path:
+        Path to the Lammps log file.
+    :type in_file_path: str
+    :param property_names:
+        Iterable of thermodynamic property names to plot.
+    :type property_names: Iterable[str]
+    """
     def get_table(in_file):
         if not os.path.isfile(in_file):
             raise FileNotFoundError(in_file + " not found")
@@ -122,7 +171,7 @@ def plot_property_from_lammps_log(in_file_path: str, property_names: Iterable[st
 
     table = get_table(in_file_path)
     write_table(table, out_file_path)
-    df = np.loadtxt(out_file_path, skiprows=1)
+    df = np.loadtxt(out_file_path, skiprows=1, usecols=tuple(range(16)))
 
     for property_name in property_names:
         with open(out_file_path) as file:
@@ -139,6 +188,17 @@ def plot_property_from_lammps_log(in_file_path: str, property_names: Iterable[st
 
 
 def extract_equilibration_step_from_logfile(filename: str) -> int:
+    """
+    Extract the kim_convergence equilibration step from LAMMPS log file.
+
+    :param filename:
+        Path to the LAMMPS log file.
+    :type filename: str
+
+    :return:
+        The equilibration step as an integer.
+    :rtype: int
+    """
     # Get file content.
     with open(filename, 'r') as file:
         data = file.read()
@@ -158,24 +218,28 @@ def extract_equilibration_step_from_logfile(filename: str) -> int:
 def compute_average_positions_from_lammps_dump(data_dir: str, file_str: str, output_filename: str,
                                                skip_steps: int) -> None:
     """
-    This function compute the average position over *.dump files which contains the file_str in data_dir and output it
-    to data_dir/[file_str]_over_dump.out
+    Average atomic positions over multiple LAMMPS dump files.
 
-    input:
-    data_dir -- the directory contains all the data e.g average_position.dump.* files
-    file_str -- the files whose names contain the file_str are considered
-    output_filename -- the name of the output file
-    skip_steps -- dump files with steps <= skip_steps are ignored
+    Within the given data directory, this function searches for dump files that start with the specified file string.
+    After the filename, every dump file should end with a step number, e.g., average_position.dump.10000,
+    average_position.dump.20000, etc. The function computes the average atomic positions across all these files,
+    ignoring any files with step numbers less than or equal to the specified skip_steps. The resulting average
+    positions are then written to the specified output file.
+
+    :param data_dir:
+        Directory containing the LAMMPS dump files.
+    :type data_dir: str
+    :param file_str:
+        String that the dump files start with.
+    :type file_str: str
+    :param output_filename:
+        Name of the output file to store the average positions.
+    :type output_filename: str
+    :param skip_steps:
+        Step number threshold; dump files with steps less than or equal to this value are ignored.
+    :type skip_steps: int
     """
-
     def get_id_pos_dict(file_name):
-        '''
-        input:
-        file_name--the file_name that contains average postion data
-        output:
-        the dictionary contains id:position pairs e.g {1:array([x1,y1,z1]),2:array([x2,y2,z2])}
-        for the averaged positions over files
-        '''
         id_pos_dict = {}
         header4N = ["NUMBER OF ATOMS"]
         header4pos = ["id", "f_avePos[1]", "f_avePos[2]", "f_avePos[3]"]
@@ -259,6 +323,23 @@ def compute_average_positions_from_lammps_dump(data_dir: str, file_str: str, out
 
 
 def compute_average_cell_from_lammps_dump(input_file: str, output_file: str, skip_steps: int) -> None:
+    """
+    Average the cell from the given input file.
+
+    This function computes the average cell across a LAMMPS dump file containing the cell information over time,
+    ignoring any cell information at step numbers less than or equal to the specified skip_steps. The resulting average
+    cell is then written to the specified output file.
+
+    :param input_file:
+        Path to the LAMMPS dump file containing cell information.
+    :type input_file: str
+    :param output_file:
+        Name of the output file to store the average cell.
+    :type output_file: str
+    :param skip_steps:
+        Step number threshold; dump files with steps less than or equal to this value are ignored.
+    :type skip_steps: int
+    """
     with open(input_file, "r") as f:
         f.readline()  # Skip the first line.
         header = f.readline()
@@ -277,62 +358,34 @@ def compute_average_cell_from_lammps_dump(input_file: str, output_file: str, ski
         print(" ".join(str(mean_data[i]) for i, name in enumerate(property_names) if name != "TimeStep"), file=f)
 
 
-def reduce_and_avg(atoms: Atoms, repeat: Tuple[int, int, int]) -> Atoms:
-    """
-    Function to reduce all atoms to the original unit cell position.
-    """
-    new_atoms = atoms.copy()
-
-    cell = new_atoms.get_cell()
-
-    # Divide each unit vector by its number of repeats.
-    # See https://stackoverflow.com/questions/19602187/numpy-divide-each-row-by-a-vector-element.
-    cell = cell / np.array(repeat)[:, None]
-
-    # Decrease size of cell in the atoms object.
-    new_atoms.set_cell(cell)
-    new_atoms.set_pbc((True, True, True))
-
-    # Set averaging factor
-    M = np.prod(repeat)
-
-    # Wrap back the repeated atoms on top of the reference atoms in the original unit cell.
-    positions = new_atoms.get_positions(wrap=True)
-
-    number_atoms = len(new_atoms)
-    original_number_atoms = number_atoms // M
-    assert number_atoms == original_number_atoms * M
-    positions_in_prim_cell = np.zeros((original_number_atoms, 3))
-
-    # Start from end of the atoms because we will remove all atoms except the reference ones.
-    for i in reversed(range(number_atoms)):
-        if i >= original_number_atoms:
-            # Get the distance to the reference atom in the original unit cell with the
-            # minimum image convention.
-            distance = new_atoms.get_distance(i % original_number_atoms, i,
-                                              mic=True, vector=True)
-            # Get the position that has the closest distance to the reference atom in the
-            # original unit cell.
-            position_i = positions[i % original_number_atoms] + distance
-            # Remove atom from atoms object.
-            new_atoms.pop()
-        else:
-            # Atom was part of the original unit cell.
-            position_i = positions[i]
-        # Average.
-        positions_in_prim_cell[i % original_number_atoms] += position_i / M
-
-    new_atoms.set_positions(positions_in_prim_cell)
-
-    return new_atoms
-
-
 def get_positions_from_averaged_lammps_dump(filename: str) -> List[Tuple[float, float, float]]:
+    """
+    Helper function to extract positions from the averaged LAMMPS dump file.
+
+    :param filename:
+        Path to the averaged LAMMPS dump file.
+    :type filename: str
+
+    :return:
+        A list of tuples representing the (x, y, z) positions of atoms.
+    :rtype: List[Tuple[float, float, float]]
+    """
     lines = sorted(np.loadtxt(filename, skiprows=9).tolist(), key=lambda x: x[0])
     return [(line[1], line[2], line[3]) for line in lines]
 
 
 def get_cell_from_averaged_lammps_dump(filename: str) -> npt.NDArray[np.float64]:
+    """
+    Helper function to extract the cell from the averaged LAMMPS dump file.
+
+    :param filename:
+        Path to the averaged LAMMPS dump file.
+    :type filename: str
+
+    :return:
+        A 3x3 numpy array representing the cell vectors.
+    :rtype: npt.NDArray[np.float64]
+    """
     cell_list = np.loadtxt(filename, comments='#')
     assert len(cell_list) == 6
     cell = np.empty(shape=(3, 3))
@@ -343,11 +396,38 @@ def get_cell_from_averaged_lammps_dump(filename: str) -> npt.NDArray[np.float64]
 
 
 def compute_heat_capacity(temperatures: List[float], log_filenames: List[str],
-                          quantity_index: int) -> Dict[str, Tuple[float, float]]:
+                          enthalpy_index: int) -> Dict[str, Tuple[float, float]]:
+    """
+    Compute the heat capacity and its error from LAMMPS log files at different temperatures.
+
+    This function assumes the kim-convergence was used to make sure that the enthalpy data is equilibrated.
+    Kim-convergence will then print the mean and 95% confidence interval of the enthalpy to the log file.
+    The quantity_index specifies the index of the enthalpy in kim-convergence.
+
+    This function uses two methods to estimate the heat capacity:
+    1. Finite differences with varying accuracy (2, 4, ..., up to the maximum possible accuracy based on the number of
+       temperatures).
+    2. Linear fit to the enthalpy vs. temperature data.
+
+    :param temperatures:
+        List of temperatures corresponding to the log files.
+    :type temperatures: List[float]
+    :param log_filenames:
+        List of LAMMPS log file paths.
+    :type log_filenames: List[str]
+    :param enthalpy_index:
+        Index of the enthalpy quantity in the kim-convergence output.
+    :type enthalpy_index: int
+
+    :return:
+        A dictionary where keys are method names (e.g., "finite_difference_accuracy_2", "fit") and values are tuples
+        containing the estimated heat capacity and its error.
+    :rtype: Dict[str, Tuple[float, float]]
+    """
     enthalpy_means = []
     enthalpy_errs = []
     for log_filename in log_filenames:
-        enthalpy_mean, enthalpy_conf = extract_mean_error_from_logfile(log_filename, quantity_index)
+        enthalpy_mean, enthalpy_conf = extract_mean_error_from_logfile(log_filename, enthalpy_index)
         enthalpy_means.append(enthalpy_mean)
         # Correct 95% confidence interval to standard error.
         enthalpy_errs.append(enthalpy_conf / 1.96)
@@ -371,15 +451,25 @@ def compute_heat_capacity(temperatures: List[float], log_filenames: List[str],
     return heat_capacity
 
 
-def extract_mean_error_from_logfile(filename: str, quantity: int) -> Tuple[float, float]:
+def extract_mean_error_from_logfile(filename: str, quantity_index: int) -> Tuple[float, float]:
     """
-    Function to extract the average from a LAAMPS log file for a given quantity
+    Extract the mean and error (95% confidence interval) of a quantity from LAMMPS log file.
 
-    @param filename : name of file
-    @param quantity : quantity to take from
-    @return mean : reported mean value
+    This function assumes the kim-convergence was used to make sure that the quantity data is equilibrated.
+    Kim-convergence will then print the mean and 95% confidence interval of the quantity to the log file.
+    The quantity_index specifies the index of the quantity in kim-convergence.
+
+    :param filename:
+        Path to the LAMMPS log file.
+    :type filename: str
+    :param quantity_index:
+        Index of the quantity in the kim-convergence output.
+    :type quantity_index: int
+
+    :return:
+        A tuple containing the mean and error of the quantity.
+    :rtype: Tuple[float, float]
     """
-
     # Get content.
     with open(filename, "r") as file:
         data = file.read()
@@ -397,13 +487,31 @@ def extract_mean_error_from_logfile(filename: str, quantity: int) -> Tuple[float
         raise ValueError("Error not found")
 
     # Get correct match.
-    mean = float(mean_matches[quantity])
-    error = float(error_matches[quantity])
+    mean = float(mean_matches[quantity_index])
+    error = float(error_matches[quantity_index])
 
     return mean, error
 
 
 def get_slope_and_error(x_values: List[float], y_values: List[float], y_errs: List[float]):
+    """
+    Fit a line to the given data and return the slope and its error.
+
+    :param x_values:
+        List of x values.
+    :type x_values: List[float]
+    :param y_values:
+        List of y values.
+    :type y_values: List[float]
+    :param y_errs:
+        List of y errors.
+    :type y_errs: List[float]
+
+    :return:
+        A tuple containing the slope and its error.
+    :rtype: Tuple[float, float]
+    """
+    # noinspection PyUnresolvedReferences
     popt, pcov = scipy.optimize.curve_fit(lambda x, m, b: m * x + b, x_values, y_values,
                                           sigma=y_errs, absolute_sigma=True)
     perr = np.sqrt(np.diag(pcov))
@@ -412,6 +520,29 @@ def get_slope_and_error(x_values: List[float], y_values: List[float], y_errs: Li
 
 def get_center_finite_difference_and_error(diff_x: float, y_values: List[float], y_errs: List[float],
                                            accuracy: int) -> Tuple[float, float]:
+    """
+    Estimate the derivative at the center of the given series of data points with finite differences and propagate the
+    error.
+
+    This function uses the findiff package to get the finite difference coefficients for the specified accuracy.
+
+    :param diff_x:
+        The difference in the x values.
+    :type diff_x: float
+    :param y_values:
+        List of y values.
+    :type y_values: List[float]
+    :param y_errs:
+        List of y errors.
+    :type y_errs: List[float]
+    :param accuracy:
+        The desired accuracy of the finite difference.
+    :type accuracy: int
+
+    :return:
+        A tuple containing the finite difference and its error.
+    :rtype: Tuple[float, float]
+    """
     assert len(y_values) == len(y_errs)
     assert len(y_values) > accuracy
     assert len(y_values) % 2 == 1
@@ -428,521 +559,139 @@ def get_center_finite_difference_and_error(diff_x: float, y_values: List[float],
     return finite_difference, sqrt(finite_difference_error_squared)
 
 
-def compute_alpha(log_filenames: List[str], temperatures: List[float], prototype_label: str):
-    ###############################################################################
-    #
-    # _compute_alpha
-    #
-    # compute the linear thermal expansion tensor from the simulation results
-    #
-    # Arguments:
-    # cell_list: list of N list of pairs of list with 6 floats each,
-    #            the first corresponding to cell sizes and angles,
-    #            and the second their errors,
-    #            where N is the number of temperatures sampled
-    # temperatures: temperature list of length N
-    # prototype_label: aflow crystal structure designation
-    #
-    ###############################################################################
-    lx = []
-    ly = []
-    lz = []
-    xy = []
-    xz = []
-    yz = []
+def compute_alpha_tensor(new_cells: list[Cell], temperatures:list[float]) -> np.ndarray:
+    """
+    Compute the thermal expansion tensor of a crystal given an array of unit cells
+    equilibrated at uniformly spaced temperatures.
 
-    lx_errs = []
-    ly_errs = []
-    lz_errs = []
-    xy_errs = []
-    xz_errs = []
-    yz_errs = []
+    Compute the deformation matrix between the center cell and other cells, 
+    and from that compute the strain matrix. The thermal expansion tensor is computed 
+    by computing the gradient of the strain as a function temperature.
 
-    # pull out the space group from the prototype label
-    # to use to determine the category of crystal symmetry
-    space_group = int(prototype_label.split("_")[2])
+    :param new_cells: An array of Cell objects equilibrated at uniformly spaced temperatures, 
+        centered on a target temperature.
+    :type new_cells:list[ase.cell.Cell]
+    :param temperatures: List of temperatures that the cells were equilibrated at
+    :type temperatures: list[float]
+    """
+    dim = 3
 
-    # must match the order of kim_convergence variables in npt.lammps
-    convergence_indicies = {"lx": 3, "ly": 4, "lz": 5, "xy": 6, "xz": 7, "yz": 8}
-
-    # get all of the box parameters and their uncertianties
-    for filename in log_filenames:
-        lxi, lx_err = extract_mean_error_from_logfile(filename, convergence_indicies["lx"])
-        lyi, ly_err = extract_mean_error_from_logfile(filename, convergence_indicies["ly"])
-        lzi, lz_err = extract_mean_error_from_logfile(filename, convergence_indicies["lz"])
-        xyi, xy_err = extract_mean_error_from_logfile(filename, convergence_indicies["xy"])
-        xzi, xz_err = extract_mean_error_from_logfile(filename, convergence_indicies["xz"])
-        yzi, yz_err = extract_mean_error_from_logfile(filename, convergence_indicies["yz"])
-
-        lx.append(lxi)
-        ly.append(lyi)
-        lz.append(lzi)
-        xy.append(xyi)
-        xz.append(xzi)
-        yz.append(yzi)
-
-        # Correct 95% confidence interval to standard error.
-        lx_errs.append(lx_err / 1.96)
-        ly_errs.append(ly_err / 1.96)
-        lz_errs.append(lz_err / 1.96)
-        xy_errs.append(xy_err / 1.96)
-        xz_errs.append(xz_err / 1.96)
-        yz_errs.append(yz_err / 1.96)
-
-    lx = np.asarray(lx)
-    ly = np.asarray(ly)
-    lz = np.asarray(lz)
-    xy = np.asarray(xy)
-    xz = np.asarray(xz)
-    yz = np.asarray(yz)
-
-    lx_errs = np.asarray(lx_errs)
-    ly_errs = np.asarray(ly_errs)
-    lz_errs = np.asarray(lz_errs)
-    xy_errs = np.asarray(xy_errs)
-    xz_errs = np.asarray(xz_errs)
-    yz_errs = np.asarray(yz_errs)
-
-    # transform lammps cell parameters to lengths and angles
-    # https://docs.lammps.org/Howto_triclinic.html#crystallographic-general-triclinic-representation-of-a-simulation-box
-    a = lx
-    b = np.sqrt(ly ** 2 + xy ** 2)
-    c = np.sqrt(lz ** 2 + xz ** 2 + yz ** 2)
-    alpha_angle = np.degrees(np.arccos((xy * xz + ly * yz) / (b * c)))
-    beta_angle = np.degrees(np.arccos(xz / c))
-    gamma_angle = np.degrees(np.arccos(xy / b))
-
-    # uncertainty propagation for lattice parameter transformations
-    a_errs = lx_errs
-    b_errs = np.sqrt((ly / np.sqrt(ly ** 2 + xy ** 2)) ** 2 * ly_errs ** 2 + (
-            xz / np.sqrt(ly ** 2 + xy ** 2)) ** 2 * xz_errs ** 2)
-    c_err_denom_squared = lz ** 2 + xz ** 2 + yz ** 2
-    c_errs = np.sqrt(
-        (lz ** 2 / c_err_denom_squared) * lz_errs ** 2 + (xz ** 2 / c_err_denom_squared) * xz_errs ** 2 +
-        (yz ** 2 / c_err_denom_squared) * yz_errs ** 2)
-
-    alpha_angle_denom = b * c * np.sqrt(1 - ((xy * xz + ly * lz) / (b * c) ** 2))
-
-    alpha_angle_errs = np.sqrt(
-        (xy / alpha_angle_denom) ** 2 * xy_errs ** 2 + (xz / alpha_angle_denom) ** 2 * xz_errs ** 2 +
-        (ly / alpha_angle_denom) ** 2 * ly_errs ** 2 + (lz / alpha_angle_denom) ** 2 * lz_errs ** 2 +
-        ((xy * xz + ly * lz) / b * alpha_angle_denom) ** 2 * b_errs ** 2 +
-        ((xy * xz + ly * lz) / c * alpha_angle_denom) ** 2 * c_errs ** 2)
-
-    beta_angle_denom = c * np.sqrt(1 - (xz / c) ** 2)
-    beta_angle_errs = np.sqrt(beta_angle_denom ** 2 * xz_errs ** 2 + (xz / c * beta_angle_denom) ** 2 * c_errs ** 2)
-    gamma_angle_denom = b * np.sqrt(1 - (xy / b) ** 2)
-    gamma_angle_errs = np.sqrt(
-        gamma_angle_denom ** 2 * xy_errs ** 2 + (xy / b * gamma_angle_denom) ** 2 * b_errs ** 2)
-
-    # needed for all space groups
-    # Use finite differences to estimate derivative.
     temperature_step = temperatures[1] - temperatures[0]
     assert all(abs(temperatures[i + 1] - temperatures[i] - temperature_step)
                < 1.0e-12 for i in range(len(temperatures) - 1))
     assert len(temperatures) >= 3
     max_accuracy = len(temperatures) - 1
-    aslope = {}
-    for accuracy in range(2, max_accuracy + 1, 2):
-        aslope[
-            f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-            temperature_step, a, a_errs, accuracy)
 
-    # create entries of the same format
-    # for zero-valued tensor components
+    center_cell = new_cells[int(np.floor(len(new_cells)/2))]
+
+    strains=[]
+
+    # calculate the strain matrix
+    for index in range(len(temperatures)):
+
+        new_cell = new_cells[index]
+
+        # calculate the deformation matrix from the old and new cells
+        # EXLANATION:
+        # Definition of deformation:
+        # x = F @ X, where X is a reference vector and x is the undeformed vector
+        # and F is the deformation gradient.
+        # Given 3 sets of X, x, we can solve for F. We can do this
+        # using the old and new unit cells. So c = F @ C, where C is the matrix with
+        # undeformed cell vectors as its columns, and c is the matrix with deformed
+        # cell vectors as its columns.
+        # However, ASE cells have the vectors as rows, not columns. So we
+        # transpose this equation to get C^T @ F^T = c^T, and can
+        # use np.linalg.solve with a = C^T, b = c^T to find F^T.
+        # Then, we must transpose F^T (actually F^T-I) to get F-I,
+        # because in eq. 2.9 of Wallace, we use u_ki*u_kj, or in matrix form,
+        # u^T @ u, where u are the components of F-I. For a nonsymmetric matrix,
+        # u^T @ u != u @ u^T, so this matters for the end result when the deformation
+        # is nonsymmetric (i.e. includes rotation). This happens in the standard
+        # orientations for monoclinic and triclinic cells.
+        deformation = np.linalg.solve(center_cell,new_cell) - np.identity(dim)
+        deformation = deformation.T
+
+        strain = np.empty((dim,dim))
+
+        for i in range(dim):
+            for j in range(dim):
+                
+                sum_term=0
+                for k in range(dim):
+                    sum_term += deformation[k,i]*deformation[k,j]
+
+                strain[i,j]=0.5*(deformation[i,j]+deformation[j,i]+sum_term)
+        
+        strains.append(strain)
+
     zero = {}
     for accuracy in range(2, max_accuracy + 1, 2):
-        zero[f"finite_difference_accuracy_{accuracy}"] = (0.0, 0.0)
+        zero[f"finite_difference_accuracy_{accuracy}"] = [0.0, 0.0]
 
-    # extract values of cell parameters at target temperature
-    aval = a[int(len(a) / 2)]
-    bval = b[int(len(b) / 2)]
-    cval = c[int(len(c) / 2)]
-    alphaval = alpha_angle[int(len(a) / 2)]
-    betaval = beta_angle[int(len(a) / 2)]
-    gammaval = gamma_angle[int(len(a) / 2)]
+    alpha11 = copy.deepcopy(zero)
+    alpha22 = copy.deepcopy(zero)
+    alpha33 = copy.deepcopy(zero)
+    alpha23 = copy.deepcopy(zero)
+    alpha13 = copy.deepcopy(zero)
+    alpha12 = copy.deepcopy(zero)
 
-    aval_err = a_errs[int(len(a) / 2)]
-    bval_err = b_errs[int(len(a) / 2)]
-    cval_err = c_errs[int(len(a) / 2)]
-    alphaval_err = alpha_angle_errs[int(len(a) / 2)]
-    betaval_err = beta_angle_errs[int(len(a) / 2)]
-    gammaval_err = gamma_angle_errs[int(len(a) / 2)]
 
-    # if the space group is cubic, only compute alpha11
-    if space_group >= 195:
-        alpha11 = copy.deepcopy(zero)
-        for accuracy in range(2, max_accuracy + 1, 2):
-            alpha11[f"finite_difference_accuracy_{accuracy}"] = aslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / aval
+    for accuracy in range(2, max_accuracy + 1, 2):
 
-            # uncertainty propagation for thermal expansion tensor calculation
-            aslope_val = aslope[f"finite_difference_accuracy_{accuracy}"][0]
-            aslope_err = aslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha11_err = np.sqrt((aslope_val / aval ** 2) ** 2 * aval_err ** 2 + (1 / aval) ** 2 * aslope_err ** 2)
-            alpha11[f"finite_difference_accuracy_{accuracy}"][1] = alpha11_err
+        strain11_temps=[]
+        strain22_temps=[]
+        strain33_temps=[]
+        strain23_temps=[]
+        strain13_temps=[]
+        strain12_temps=[]
 
-        alpha22 = alpha11
-        alpha33 = alpha11
+        
+        for t in range(len(temperatures)):
 
-        alpha12 = copy.deepcopy(zero)
-        alpha13 = copy.deepcopy(zero)
-        alpha23 = copy.deepcopy(zero)
+            strain11=strains[t][0,0]
+            strain22=strains[t][1,1]
+            strain33=strains[t][2,2]
+            strain23=strains[t][1,2]
+            strain13=strains[t][0,2]
+            strain12=strains[t][0,1]
 
-    # hexagona, trigonal, tetragonal space groups also compute alpha33
-    elif space_group >= 75 and space_group <= 194:
+            strain11_temps.append(strain11)
+            strain22_temps.append(strain22)
+            strain33_temps.append(strain33)
+            strain23_temps.append(strain23)
+            strain13_temps.append(strain13)
+            strain12_temps.append(strain12)
 
-        cslope = {}
-        for accuracy in range(2, max_accuracy + 1, 2):
-            cslope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, c, c_errs, accuracy)
+        # TODO: figure out how to calculate uncertianties
+        strain_errs = list(np.zeros(len(strain11_temps)))
 
-        alpha11 = copy.deepcopy(zero)
-        alpha33 = copy.deepcopy(zero)
-        for accuracy in range(2, max_accuracy + 1, 2):
-            alpha11[f"finite_difference_accuracy_{accuracy}"] = aslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / aval
-            alpha33[f"finite_difference_accuracy_{accuracy}"] = cslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / cval
+        alpha11[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain11_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
+        alpha22[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain22_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
+        alpha33[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain33_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
+        alpha23[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain23_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
+        alpha13[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain13_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
+        alpha12[f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(temperature_step,
+                                                                                                   strain12_temps,
+                                                                                                   strain_errs,
+                                                                                                   accuracy)
 
-            # uncertainty propagation for thermal expansion tensor calculation
-            aslope_val = aslope[f"finite_difference_accuracy_{accuracy}"][0]
-            aslope_err = aslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha11_err = np.sqrt((aslope_val / aval ** 2) ** 2 * aval_err ** 2 + (1 / aval) ** 2 * aslope_err ** 2)
-            alpha11[f"finite_difference_accuracy_{accuracy}"][1] = alpha11_err
-
-            cslope_val = cslope[f"finite_difference_accuracy_{accuracy}"][0]
-            cslope_err = cslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha33_err = np.sqrt((cslope_val / cval ** 2) ** 2 * cval_err ** 2 + (1 / cval) ** 2 * cslope_err ** 2)
-            alpha33[f"finite_difference_accuracy_{accuracy}"][1] = alpha33_err
-
-        alpha22 = alpha33
-
-        alpha12 = copy.deepcopy(zero)
-        alpha13 = copy.deepcopy(zero)
-        alpha23 = copy.deepcopy(zero)
-
-    # orthorhombic, also compute alpha22
-    elif space_group >= 16 and space_group <= 74:
-        bslope = {}
-        cslope = {}
-        for accuracy in range(2, max_accuracy + 1, 2):
-            bslope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, b, b_errs, accuracy)
-            cslope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, c, c_errs, accuracy)
-
-        alpha11 = copy.deepcopy(zero)
-        alpha22 = copy.deepcopy(zero)
-        alpha33 = copy.deepcopy(zero)
-        for accuracy in range(2, max_accuracy + 1, 2):
-            alpha11[f"finite_difference_accuracy_{accuracy}"] = aslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / aval
-            alpha22[f"finite_difference_accuracy_{accuracy}"] = bslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / bval
-            alpha33[f"finite_difference_accuracy_{accuracy}"] = cslope[
-                                                                    f"finite_difference_accuracy_{accuracy}"] / cval
-
-            # uncertainty propagation for thermal expansion tensor calculation
-            aslope_val = aslope[f"finite_difference_accuracy_{accuracy}"][0]
-            aslope_err = aslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha11_err = np.sqrt((aslope_val / aval ** 2) ** 2 * aval_err ** 2 + (1 / aval) ** 2 * aslope_err ** 2)
-            alpha11[f"finite_difference_accuracy_{accuracy}"][1] = alpha11_err
-
-            bslope_val = bslope[f"finite_difference_accuracy_{accuracy}"][0]
-            bslope_err = bslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha22_err = np.sqrt((bslope_val / bval ** 2) ** 2 * bval_err ** 2 + (1 / bval) ** 2 * bslope_err ** 2)
-            alpha22[f"finite_difference_accuracy_{accuracy}"][1] = alpha22_err
-
-            cslope_val = cslope[f"finite_difference_accuracy_{accuracy}"][0]
-            cslope_err = cslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha33_err = np.sqrt((cslope_val / cval ** 2) ** 2 * cval_err ** 2 + (1 / cval) ** 2 * cslope_err ** 2)
-            alpha33[f"finite_difference_accuracy_{accuracy}"][1] = alpha33_err
-
-        alpha12 = copy.deepcopy(zero)
-        alpha13 = copy.deepcopy(zero)
-        alpha23 = copy.deepcopy(zero)
-
-    # monoclinic or triclinic
-    elif space_group <= 15:
-        bslope = {}
-        cslope = {}
-        alpha_angle_slope = {}
-        beta_angle_slope = {}
-        gamma_angle_slope = {}
-        gamma_star_prime = {}
-
-        # calculating reciprocal lattice angle gamma_star
-        gamma_star_array = np.arccos((np.cos(np.radians(alpha_angle)) * np.cos(np.radians(beta_angle)) -
-                                      np.cos(np.radians(gamma_angle))) / (
-                                             np.sin(np.radians(alpha_angle)) * np.sin(np.radians(beta_angle))))
-
-        # calculate error propagation for reciprocal lattice angle gamma_star
-        gamma_star_errs_denom = 1 - (np.cos(np.radians(alpha_angle)) * np.cos(np.radians(beta_angle)) -
-                                     (1 / (np.sin(np.radians(alpha_angle)))) * (
-                                             1 / np.cos(np.radians(beta_angle))) * np.cos(
-                    np.radians(gamma_angle))) ** 2
-
-        gamma_star_errs = np.sqrt(((1 / np.tan(np.radians(alpha_angle))) * (1 / np.sin(np.radians(alpha_angle))) * (
-                1 / np.cos(np.radians(beta_angle))) * np.cos(gamma_angle)
-                                   - np.sin(np.radians(alpha_angle)) * np.cos(
-                    np.radians(beta_angle))) ** 2 / gamma_star_errs_denom * alpha_angle_errs ** 2 +
-                                  ((1 / np.sin(np.radians(alpha_angle))) * np.tan(np.radians(beta_angle)) * (
-                                          1 / np.cos(np.radians(beta_angle))) * np.cos(
-                                      np.radians(gamma_angle)) +
-                                   np.cos(np.radians(alpha_angle)) * np.cos(np.radians(
-                                              beta_angle))) ** 2 / gamma_star_errs_denom * beta_angle_errs ** 2 +
-                                  ((1 / np.sin(np.radians(alpha_angle))) * (
-                                          1 / np.cos(np.radians(beta_angle))) * np.sin(np.radians(
-                                      gamma_angle))) ** 2 / gamma_star_errs_denom * gamma_angle_errs ** 2)
-
-        # pull out central value/error at target temperature
-        gamma_star = gamma_star_array[int(len(gamma_star_array) / 2)]
-        gamma_star_err = gamma_star_errs[int(len(gamma_star_array) / 2)]
-
-        alpha11 = copy.deepcopy(zero)
-        alpha22 = copy.deepcopy(zero)
-        alpha33 = copy.deepcopy(zero)
-        alpha12 = copy.deepcopy(zero)
-        alpha13 = copy.deepcopy(zero)
-        alpha23 = copy.deepcopy(zero)
-
-        for accuracy in range(2, max_accuracy + 1, 2):
-            # calculate temperature derivatives
-            bslope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, b, b_errs, accuracy)
-            cslope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, c, c_errs, accuracy)
-            alpha_angle_slope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, alpha_angle, alpha_angle_errs, accuracy)
-            beta_angle_slope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, beta_angle, beta_angle_errs, accuracy)
-            gamma_angle_slope[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, gamma_angle, gamma_angle_errs, accuracy)
-            # temperature derivative of gamma_star, only needed for triclinic structures
-            gamma_star_prime[
-                f"finite_difference_accuracy_{accuracy}"] = get_center_finite_difference_and_error(
-                temperature_step, gamma_star_array, gamma_star_errs, accuracy)
-
-        for accuracy in range(2, max_accuracy + 1, 2):
-            # parse out values and associated uncertianties
-            aslope_val = aslope[f"finite_difference_accuracy_{accuracy}"][0]
-            aslope_err = aslope[f"finite_difference_accuracy_{accuracy}"][1]
-            bslope_val = bslope[f"finite_difference_accuracy_{accuracy}"][0]
-            bslope_err = bslope[f"finite_difference_accuracy_{accuracy}"][1]
-            cslope_val = cslope[f"finite_difference_accuracy_{accuracy}"][0]
-            cslope_err = cslope[f"finite_difference_accuracy_{accuracy}"][1]
-            alpha_angle_slope_val = alpha_angle_slope[f"finite_difference_accuracy_{accuracy}"][0]
-            alpha_angle_slope_err = alpha_angle_slope[f"finite_difference_accuracy_{accuracy}"][1]
-            beta_angle_slope_val = beta_angle_slope[f"finite_difference_accuracy_{accuracy}"][0]
-            beta_angle_slope_err = beta_angle_slope[f"finite_difference_accuracy_{accuracy}"][1]
-            gamma_angle_slope_val = gamma_angle_slope[f"finite_difference_accuracy_{accuracy}"][0]
-            gamma_angle_slope_err = gamma_angle_slope[f"finite_difference_accuracy_{accuracy}"][1]
-            gamma_star_slope_val = gamma_star_prime[f"finite_difference_accuracy_{accuracy}"][0]
-            gamma_star_slope_err = gamma_star_prime[f"finite_difference_accuracy_{accuracy}"][1]
-            # monoclinic
-            if space_group > 2:
-
-                alpha11[f"finite_difference_accuracy_{accuracy}"] = (1 / aval) * aslope_val
-                alpha22[f"finite_difference_accuracy_{accuracy}"] = ((1 / bval) * bslope_val +
-                                                                     gamma_angle_slope_val *
-                                                                     (1 / np.tan(np.radians(gammaval))))
-
-                alpha33[f"finite_difference_accuracy_{accuracy}"] = (1 / cval) * cslope_val
-                alpha12[f"finite_difference_accuracy_{accuracy}"] = ((-1 / 2) * ((1 / aval) * aslope_val -
-                                                                                 (1 / bval) * bslope_val) * (
-                                                                             1 / np.tan(np.radians(gammaval))) -
-                                                                     (1 / 2) * gamma_angle_slope_val)
-
-                alpha13[f"finite_difference_accuracy_{accuracy}"] = (-1 / 2) * beta_angle_slope_val
-                alpha23[f"finite_difference_accuracy_{accuracy}"] = (
-                        (1 / 2) * ((-1 / np.sin(np.radians(gammaval))) * alpha_angle_slope_val +
-                                   beta_angle_slope_val * (1 / np.tan(np.radians(gammaval)))))
-
-                # uncertainty propagation for thermal expansion tensor calculation
-                alpha11_err = np.sqrt(
-                    (aslope_val / aval ** 2) ** 2 * aval_err ** 2 + (1 / aval) ** 2 * aslope_err ** 2)
-                alpha11[f"finite_difference_accuracy_{accuracy}"][1] = alpha11_err
-
-                alpha22_err = np.sqrt(
-                    (bslope_val / bval ** 2) ** 2 * bval_err ** 2 + (1 / bval) ** 2 * bslope_err ** 2 +
-                    ((1 / np.tan(gammaval) * gamma_angle_slope_err) ** 2 -
-                     (gamma_angle_slope_val * 1 / np.sin(gammaval) * gammaval_err) ** 2))
-                alpha22[f"finite_difference_accuracy_{accuracy}"][1] = alpha22_err
-
-                alpha33_err = np.sqrt(
-                    (cslope_val / cval ** 2) ** 2 * cval_err ** 2 + (1 / cval) ** 2 * cslope_err ** 2)
-                alpha33[f"finite_difference_accuracy_{accuracy}"][1] = alpha33_err
-
-                alpha12_err = np.sqrt((aslope_val * 1 / np.tan(gammaval) / (2 * aval ** 2)) ** 2 * aval_err ** 2 +
-                                      (bslope_val * 1 / np.tan(gammaval) / (2 * bval ** 2)) ** 2 * bval_err ** 2 +
-                                      ((1 / 2) * (aslope_val / aval - bslope_val / bval) * (
-                                              1 / np.sin(gammaval)) ** 2) ** 2 * gammaval_err ** 2 +
-                                      (1 / (2 * aval * np.tan(gammaval))) ** 2 * aslope_err ** 2 +
-                                      (1 / (2 * bval * np.tan(gammaval))) ** 2 * bslope_err ** 2 +
-                                      (1 / 4) * gamma_angle_slope_err ** 2)
-                alpha12[f"finite_difference_accuracy_{accuracy}"][1] = alpha12_err
-
-                alpha13_err = np.sqrt((1 / 4) * beta_angle_slope_err ** 2)
-                alpha13[f"finite_difference_accuracy_{accuracy}"][1] = alpha13_err
-
-                alpha23_err = np.sqrt((1 / (2 * np.sin(gammaval))) ** 2 * alpha_angle_slope_err ** 2 +
-                                      (1 / (2 * np.tan(gammaval))) ** 2 * beta_angle_slope_err ** 2 +
-                                      ((1 / 2) * (1 / np.sin(gammaval)) * (
-                                              alpha_angle_slope_val * (1 / np.tan(gammaval)) -
-                                              beta_angle_slope_val * (
-                                                      1 / np.sin(gammaval)))) ** 2 * gammaval_err ** 2)
-                alpha23[f"finite_difference_accuracy_{accuracy}"][1] = alpha23_err
-
-            # triclinic
-            elif space_group <= 2:
-
-                alpha11[f"finite_difference_accuracy_{accuracy}"] = ((1 / aval) * aslope_val +
-                                                                     beta_angle_slope_val *
-                                                                     (1 / np.tan(np.radians(betaval))))
-                alpha22[f"finite_difference_accuracy_{accuracy}"] = ((1 / bval) * bslope_val +
-                                                                     alpha_angle_slope_val *
-                                                                     (1 / np.tan(np.radians(
-                                                                         alphaval))) + gamma_star_slope_val *
-                                                                     (1 / np.tan(gamma_star)))
-                alpha33[f"finite_difference_accuracy_{accuracy}"] = ((1 / cval) * cslope_val)
-                alpha12[f"finite_difference_accuracy_{accuracy}"] = (
-                        (1 / 2) * (1 / np.tan(gamma_star)) * ((1 / aval) * aslope_val -
-                                                              (1 / bval) * bslope_val -
-                                                              alpha_angle_slope_val * (1 / np.tan(alphaval)) +
-                                                              beta_angle_slope_val * (1 / np.tan(betaval))) + (
-                                1 / 2) *
-                        gamma_star_slope_val)
-                alpha13[f"finite_difference_accuracy_{accuracy}"] = (
-                        (1 / 2) * ((1 / aval) * aslope_val -
-                                   (1 / cval) * cslope_val) * (
-                                1 / np.tan(betaval)) -
-                        (1 / 2) * beta_angle_slope_val)
-                alpha23[f"finite_difference_accuracy_{accuracy}"] = (
-                        (1 / 2) * (((1 / aval) * aslope_val - (1 / cval) * cslope_val) * (
-                         1 / np.tan(gamma_star)) * (1 / np.tan(betaval)) + (
-                                           (1 / bval) * bslope_val - (1 / cval) * cslope_val) * (
-                                           1 / (np.tan(alphaval) * np.sin(gamma_star))) - (
-                                           (1 / np.sin(gamma_star)) * alpha_angle_slope_val
-                                           + beta_angle_slope_val * (1 / np.tan(gamma_star)))))
-
-                # uncertainty propagation for thermal expansion tensor calculation
-                alpha11_err = np.sqrt((aslope_val / aval ** 2) ** 2 * aval_err ** 2 +
-                                      (1 / aval) ** 2 * aslope_err + (beta_angle_slope * (
-                        1 / np.sin(np.radians(betaval))) ** 2) ** 2 * betaval_err ** 2 +
-                                      (1 / np.tan(np.radians(betaval))) ** 2 * beta_angle_slope_err ** 2)
-                alpha11[f"finite_difference_accuracy_{accuracy}"][1] = alpha11_err
-
-                alpha22_err = np.sqrt((bslope_val / bval ** 2) ** 2 * bval_err ** 2 +
-                                      (1 / bval) ** 2 * bslope_err ** 2 +
-                                      (alpha_angle_slope_val * (
-                                              1 / np.sin(np.radians(alphaval))) ** 2) ** 2 * alphaval_err ** 2 +
-                                      (1 / np.tan(np.radians(alphaval))) ** 2 * alpha_angle_slope_err ** 2 +
-                                      (gamma_star_prime * (1 / np.sin(
-                                          np.radians(gamma_star))) ** 2) ** 2 * gamma_star_err ** 2 +
-                                      (1 / np.tan(np.radians(gamma_star))) ** 2 * gamma_star_slope_err ** 2)
-                alpha22[f"finite_difference_accuracy_{accuracy}"][1] = alpha22_err
-
-                alpha33_err = np.sqrt((cslope_val / cval ** 2) ** 2 * cval_err ** 2 +
-                                      (1 / cval) ** 2 * cslope_err ** 2)
-                alpha33[f"finite_difference_accuracy_{accuracy}"][1] = alpha33_err
-
-                alpha12_err = np.sqrt(
-                    (aslope_val / (2 * aval ** 2 * np.tan(np.radians(gamma_star)))) ** 2 * aval_err ** 2 +
-                    (1 / (2 * aval * np.tan(np.radians(gamma_star)))) ** 2 * aslope_err ** 2 +
-                    (bslope_val / (2 * bval ** 2 * np.tan(np.radians(gamma_star)))) ** 2 * bval_err ** 2 +
-                    (1 / (2 * bval * np.tan(np.radians(gamma_star)))) ** 2 * bslope_err ** 2 +
-                    (alpha_angle_slope_val / (np.tan(np.radians(gamma_star)) * np.sin(
-                        np.radians(alphaval)) ** 2)) ** 2 * alphaval_err ** 2 +
-                    (1 / (2 * np.tan(np.radians(gamma_star)) * np.tan(
-                        np.radians(alphaval))) ** 2 * alpha_angle_slope_err ** 2) +
-                    (beta_angle_slope_val / (np.tan(np.radians(gamma_star)) * np.sin(
-                        np.radians(betaval)) ** 2)) ** 2 * betaval_err ** 2 +
-                    (1 / (2 * np.tan(np.radians(gamma_star)) * np.tan(
-                        np.radians(betaval))) ** 2 * beta_angle_slope_err ** 2) +
-                    ((1 / np.sin(np.radians(gamma_star))) ** 2 * ((aval / aslope_val) - (bval / bslope_val) - (
-                            alpha_angle_slope_val / np.tan(np.radians(alphaval))) +
-                                                                  (beta_angle_slope_val / np.tan(np.radians(
-                                                                      betaval))))) ** 2 * gamma_star_err ** 2 +
-                    (1 / 2) ** 2 * gamma_star_slope_err ** 2)
-
-                alpha12[f"finite_difference_accuracy_{accuracy}"][1] = alpha12_err
-
-                alpha13_err = np.sqrt(
-                    (aslope_val / (2 * aval ** 2 * np.tan(np.radians(betaval)))) ** 2 * aval_err ** 2 +
-                    (1 / (2 * aval * np.tan(np.radians(betaval)))) ** 2 * aslope_err ** 2 +
-                    (cslope_val / (2 * cval ** 2 * np.tan(np.radians(betaval)))) ** 2 * cval_err ** 2 +
-                    (1 / (2 * cval * np.tan(np.radians(betaval)))) ** 2 * cslope_err ** 2 +
-                    ((1 / (2 * np.sin(np.radians(betaval)))) * (
-                            (aslope_val / aval) - (cslope_val / cval))) ** 2 * betaval_err ** 2 +
-                    (1 / 2) ** 2 * beta_angle_slope_err ** 2)
-                alpha13[f"finite_difference_accuracy_{accuracy}"][1] = alpha13_err
-
-                alpha23_prefactor1 = ((1 / (2 * np.tan(np.radians(gamma_star)) * np.tan(np.radians(betaval)))) + (
-                        1 / (2 * np.sin(np.radians(gamma_star)) * np.tan(np.radians(alphaval))))) ** 2
-                alpha23_prefactor2 = ((1 / np.sin(np.radians(gamma_star))) ** 2 * (
-                        (1 / (2 * np.tan(np.radians(betaval)))) * (
-                        (aslope_val / aval) - (cslope_val / cval)) + (beta_angle_slope_val / 2)) -
-                                      (alpha_angle_slope_val + (1 / np.tan(np.radians(alphaval))) * (
-                                              (bslope_val / bval) - (cslope_val / cval))) / (
-                                              np.tan(np.radians(gamma_star)) * np.sin(
-                                          np.radians(gamma_star)))) ** 2
-                alpha23_err = np.sqrt(((aslope_val / aval ** 2) * (1 / (2 * np.tan(np.radians(gamma_star)) * np.tan(
-                    np.radians(betaval))))) ** 2 * aval_err ** 2 +
-                                      (1 / (2 * aval * np.tan(np.radians(gamma_star)) * np.tan(
-                                          np.radians(betaval)))) ** 2 * aslope_err ** 2 +
-                                      (bslope_val / (2 * np.sin(np.radians(gamma_star)) * np.tan(
-                                          np.radians(alphaval)) * bval ** 2)) ** 2 * bval_err ** 2 +
-                                      (1 / (2 * np.sin(np.radians(gamma_star)) * np.tan(
-                                          np.radians(alphaval)) * bval)) ** 2 * bslope_err ** 2 +
-                                      (cslope_val / cval ** 2) ** 2 * alpha23_prefactor1 * cval_err ** 2 + (
-                                              1 / cval) ** 2 * alpha23_prefactor1 * cslope_err ** 2 +
-                                      ((bslope_val / bval) - (cslope_val / cval)) / (
-                                              2 * np.sin(np.radians(gamma_star)) * np.sin(
-                                          np.radians(alphaval)) ** 2) ** 2 * alphaval_err ** 2 +
-                                      (1 / (2 * np.sin(np.radians(gamma_star)))) ** 2 * alpha_angle_slope_val ** 2 +
-                                      ((aslope_val / aval) - (cslope_val / cval)) / (
-                                              2 * np.tan(np.radians(gamma_star)) * np.sin(
-                                          np.radians(betaval)) ** 2) ** 2 * betaval_err ** 2 +
-                                      (1 / (2 * np.tan(np.radians(gamma_star)))) ** 2 * beta_angle_slope_err ** 2 +
-                                      alpha23_prefactor2 * gamma_star_err ** 2)
-                alpha23[f"finite_difference_accuracy_{accuracy}"][1] = alpha23_err
-    else:
-        raise RuntimeError("invalid space group in prototype label")
-
-    # enforce tensor symmetries
-    alpha21 = alpha12
-    alpha31 = alpha13
-    alpha32 = alpha23
-
-    alpha = np.array([[alpha11, alpha12, alpha13],
-                      [alpha21, alpha22, alpha23],
-                      [alpha31, alpha32, alpha33]])
+    alpha_voigt = np.asarray([alpha11,alpha22,alpha33,alpha23,alpha13,alpha12])
 
     # thermal expansion coeff tensor
-    return alpha
-
-
-def check_lammps_log_for_wrong_structure_format(log_file):
-    wrong_format_in_structure_file = False
-
-    try:
-        with open(log_file, "r") as logfile:
-            data = logfile.read()
-            data = data.split("\n")
-            final_line = data[-2]
-
-            if final_line == "Last command: read_data output/zero_temperature_crystal.lmp":
-                wrong_format_in_structure_file = True
-    except FileNotFoundError:
-        pass
-
-    return wrong_format_in_structure_file
+    return alpha_voigt

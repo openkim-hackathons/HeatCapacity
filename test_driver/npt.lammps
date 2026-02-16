@@ -5,7 +5,7 @@ kim init ${modelname} metal unit_conversion_mode
 boundary p p p
 
 # Explicitly include neighbor list command so that it can be changed conveniently.
-neigh_modify delay 0 every 1 check yes one 2000
+neigh_modify delay 0 every 1 check yes one 4000
 
 # Read initial zero-temperature crystal.
 read_data output/zero_temperature_crystal.lmp
@@ -30,7 +30,8 @@ velocity all create $(v_temperature*v__u_temperature) ${temperature_seed}
 
 # Equilibrate and sample in NPT ensemble.
 fix NPT all npt temp $(v_temperature*v__u_temperature) $(v_temperature*v__u_temperature) $(v_temperature_damping*v__u_time) &
-                tri $(v_pressure*v__u_pressure) $(v_pressure*v__u_pressure) $(v_pressure_damping*v__u_time)
+                tri $(v_pressure*v__u_pressure) $(v_pressure*v__u_pressure) $(v_pressure_damping*v__u_time) &
+                flip no
 
 # Set timestep.
 timestep $(v_timestep*v__u_time)
@@ -58,6 +59,37 @@ variable yz_metal equal yz/${_u_distance}
 # Since we want to convert the units of the enthalpy, however, we have to define it ourselves.
 # In metal units: 1 bar Angstrom^3 = 6.241509074460762e-7 eV
 variable enthalpy_metal equal "v_pe_metal + v_ke_metal + v_press_metal * v_vol_metal * 6.241509074460762e-7"
+
+# Write trajectory.
+dump traj all atom 10000 ${trajectory_filename}
+
+# Temperature may be off because of rigid bodies or SHAKE constraints.
+# See https://docs.lammps.org/velocity.html
+run 0
+velocity all scale $(v_temperature*v__u_temperature)
+
+# Compute mean squared displacement 
+compute msd all msd com yes
+
+# Perform a short run to equilibrate MSD
+run 5000
+        
+# Calculate slope of MSD to detect diffusion
+fix msd_vector all vector 100 c_msd[4]
+variable msd_slope equal slope(f_msd_vector)
+
+# Thermodynamic output
+thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
+                         v_xlo_metal v_xhi_metal v_ylo_metal v_yhi_metal v_zlo_metal v_zhi_metal &
+                         v_xy_metal v_xz_metal v_yz_metal v_enthalpy_metal c_msd[4] v_msd_slope
+thermo 1000
+        
+# Perform a short run and decide whether or not to quit
+run 5000
+if "${msd_slope} > $(v_msd_threshold*(v__u_distance^2))" then "write_dump all atom ${melted_crystal_output}" &
+                                                                        "print 'Crystal melted or vaporized'" &
+                                                                        "quit"
+unfix msd_vector
 
 # Set up logging of thermodynamic information.
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
@@ -95,19 +127,14 @@ variable zsu atom "(c_up[3]-zlo)/(zhi-zlo)"
 fix avePos all ave/atom 1 10000 10000 v_xsu v_ysu v_zsu
 dump avePosDump all custom 10000 ${average_position_filename} id f_avePos[1] f_avePos[2] f_avePos[3]
 
-# Prevent dump at timestep 0.
-dump_modify avePosDump delay 10000
+# Prevent dump at timestep 0 and 10000.
+dump_modify avePosDump delay 20000
 
 # Average the cell information.
 variable lx_metal equal "v_xhi_metal - v_xlo_metal"
 variable ly_metal equal "v_yhi_metal - v_ylo_metal"
 variable lz_metal equal "v_zhi_metal - v_zlo_metal"
 fix aveCell all ave/time 1 10000 10000 v_lx_metal v_ly_metal v_lz_metal v_xy_metal v_xz_metal v_yz_metal file ${average_cell_filename}
-
-# Temperature may be off because of rigid bodies or SHAKE constraints.
-# See https://docs.lammps.org/velocity.html
-run 0
-velocity all scale $(v_temperature*v__u_temperature)
 
 # Set up convergence check with kim-convergence.
 # python run_length_control input 8 SELF 1 variable vol_metal variable temp_metal variable enthalpy_metal format pissssss file run_length_control.py
@@ -126,7 +153,8 @@ unfix avePos
 unfix aveCell
 unfix cr_fix  # From run_length_control.py
 undump avePosDump
+undump traj
 reset_timestep 0
 
-# Write the initial starting file for a true simulation.
+# Write restart file.
 write_restart ${write_restart_filename}
