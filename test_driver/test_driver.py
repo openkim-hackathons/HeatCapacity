@@ -15,9 +15,9 @@ from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_
 
 class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
-                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, repeat: Sequence[int] = (0, 0, 0),
-                   max_workers: Optional[int] = None, lammps_command = "lmp",
-                   msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
+                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100,
+                   repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
+                   lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
                    random_seeds: Optional[Sequence[int]] = (1, 2, 3), **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
@@ -81,9 +81,9 @@ class TestDriver(SingleCrystalTestDriver):
         :param repeat:
             Tuple of three integers specifying how often to repeat the unit cell in each direction to build the
             supercell.
-            If (0, 0, 0) is given, a supercell size close to 10,000 atoms is chosen.
-            Default is (0, 0, 0).
-            All entries have to be bigger than zero.
+            If None, a supercell size close to 10,000 atoms is chosen.
+            Default is None.
+            If not None, all entries have to be bigger than zero.
         :type repeat: Sequence[int]
         :param max_workers:
             Maximum number of parallel workers to use for running Lammps simulations at different temperatures.
@@ -158,11 +158,12 @@ class TestDriver(SingleCrystalTestDriver):
         if not number_sampling_timesteps > 0:
             raise ValueError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
 
-        if not len(repeat) == 3:
-            raise ValueError("The repeat argument has to be a tuple of three integers.")
+        if repeat is not None:
+            if not len(repeat) == 3:
+                raise ValueError("The repeat argument has to be a tuple of three integers.")
 
-        if not all(r >= 0 for r in repeat):
-            raise ValueError("All number of repeats must be bigger than zero.")
+            if not all(r > 0 for r in repeat):
+                raise ValueError("All number of repeats must be bigger than zero.")
 
         if max_workers is not None:
             if not max_workers > 0:
@@ -199,11 +200,12 @@ class TestDriver(SingleCrystalTestDriver):
         species = sorted(set(symbols))
 
         # Build supercell.
-        if repeat == (0, 0, 0):
+        if repeat is None:
             # Get a size close to 10K atoms (shown to give good convergence)
             x = int(np.ceil(np.cbrt(10000 / len(atoms_new))))
             repeat = (x, x, x)
 
+        assert repeat is not None
         atoms_new = atoms_new.repeat(repeat)
 
         # Get temperatures that should be simulated.
