@@ -15,7 +15,7 @@ import scipy.optimize
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
                number_sampling_timesteps: int, species: List[str],
                msd_threshold_angstrom_squared_per_sampling_timesteps: float, number_msd_timesteps: int,
-               rlc_n_every: int, output_dir: str, equilibration_plots: bool, lammps_command: str,
+               rlc_run_length: int, rlc_n_every: int, output_dir: str, equilibration_plots: bool, lammps_command: str,
                random_seed: int) -> Tuple[str, str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
@@ -57,6 +57,10 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
         timesteps.
     :type number_msd_timesteps: int
+    :param rlc_run_length:
+        Number of timesteps after which kim-convergence will check for convergence.
+        This is also the timestep interval for generated trajectories.
+    :type rlc_run_length: int
     :param rlc_n_every:
         Number of timesteps between storage of values for the run-length control in kim-convergence.
     :type rlc_n_every: int
@@ -101,6 +105,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "msd_trajectory_filename": f"{output_dir}/msd_trajectory_{temperature_index}.lammpstrj",
         "msd_threshold": msd_threshold_angstrom_squared_per_sampling_timesteps,
         "msd_timesteps": number_msd_timesteps,
+        "rlc_run_length": rlc_run_length,
         "rlc_n_every": rlc_n_every,
         "melted_crystal_output": melted_crystal_filename
     }

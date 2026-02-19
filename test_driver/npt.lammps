@@ -66,7 +66,7 @@ run 0
 velocity all scale $(v_temperature*v__u_temperature)
 
 # Write trajectory.
-dump msd_traj all atom 10000 ${msd_trajectory_filename}
+dump msd_traj all atom ${rlc_run_length} ${msd_trajectory_filename}
 
 # Compute mean squared displacement 
 compute msd all msd com yes
@@ -96,7 +96,7 @@ undump msd_traj
 reset_timestep 0
 
 # Write trajectory.
-dump traj all atom 10000 ${trajectory_filename}
+dump traj all atom ${rlc_run_length} ${trajectory_filename}
 
 # Set up logging of thermodynamic information.
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
@@ -125,23 +125,23 @@ variable ysu atom "(c_up[2]-ylo)/(yhi-ylo) - (yz*(c_up[3]-zlo))/((yhi-ylo)*(zhi-
 variable zsu atom "(c_up[3]-zlo)/(zhi-zlo)"
 
 # Since Lammps can dump scaled unwrapped coordinates, one can test above variables by including the following two lines:
-# dump test all custom 10000 output/test.dump.* id xsu ysu zsu v_xsu v_ysu v_zsu
-# dump_modify test delay 10000
+# dump test all custom ${rlc_run_length} output/test.dump.* id xsu ysu zsu v_xsu v_ysu v_zsu
+# dump_modify test delay ${rlc_run_length}
 
 # Average the scaled unwrapped positions.
-# Note that kim-convergence interrupts simulations after 10000 timesteps.
-# We write out the average scaled unwrapped positions after every 10000 timesteps.
-fix avePos all ave/atom 1 10000 10000 v_xsu v_ysu v_zsu
-dump avePosDump all custom 10000 ${average_position_filename} id f_avePos[1] f_avePos[2] f_avePos[3]
+# Note that kim-convergence interrupts simulations after ${rlc_run_length} timesteps.
+# We write out the average scaled unwrapped positions after every ${rlc_run_length} timesteps.
+fix avePos all ave/atom 1 ${rlc_run_length} ${rlc_run_length} v_xsu v_ysu v_zsu
+dump avePosDump all custom ${rlc_run_length} ${average_position_filename} id f_avePos[1] f_avePos[2] f_avePos[3]
 
 # Prevent dump at timestep 0.
-dump_modify avePosDump delay 10000
+dump_modify avePosDump delay ${rlc_run_length}
 
 # Average the cell information.
 variable lx_metal equal "v_xhi_metal - v_xlo_metal"
 variable ly_metal equal "v_yhi_metal - v_ylo_metal"
 variable lz_metal equal "v_zhi_metal - v_zlo_metal"
-fix aveCell all ave/time 1 10000 10000 v_lx_metal v_ly_metal v_lz_metal v_xy_metal v_xz_metal v_yz_metal file ${average_cell_filename}
+fix aveCell all ave/time 1 ${rlc_run_length} ${rlc_run_length} v_lx_metal v_ly_metal v_lz_metal v_xy_metal v_xz_metal v_yz_metal file ${average_cell_filename}
 
 # Set up convergence check with kim-convergence.
 python run_length_control input 20 SELF ${rlc_n_every} variable vol_metal variable temp_metal variable enthalpy_metal variable lx_metal variable ly_metal variable lz_metal variable xy_metal variable xz_metal variable yz_metal format pissssssssssssssssss file run_length_control.py
@@ -149,9 +149,9 @@ python run_length_control input 20 SELF ${rlc_n_every} variable vol_metal variab
 # Run until converged.
 python run_length_control invoke
 
-# Run 10000 steps more in the converged regime. 
+# Run ${rlc_run_length} steps more in the converged regime.
 # This makes sure that we have average fractional coordinates and cell information that were obtained entirely in equilibrium.
-run 10000
+run ${rlc_run_length}
 
 # Reset.
 unfix NPT

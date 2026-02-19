@@ -19,7 +19,7 @@ class TestDriver(SingleCrystalTestDriver):
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
                    number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
-                   rlc_n_every: int = 10, rlc_initial_run_length: int = 10000, rlc_min_samples: int = 5,
+                   rlc_n_every: int = 10, rlc_run_length: int = 10000, rlc_min_samples: int = 5,
                    output_dir: str = "output", equilibration_plots: bool = True, **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
@@ -123,11 +123,12 @@ class TestDriver(SingleCrystalTestDriver):
             Default is 10.
             Should be bigger than zero.
         :type rlc_n_every: int
-        :param rlc_initial_run_length:
-            Initial run length in timesteps for run-length control with kim-convergence.
+        :param rlc_run_length:
+            Run length in timesteps for run-length control with kim-convergence.
+            This will also be the timestep interval in generated trajectory files.
             Default is 10000 timesteps.
             Should be bigger than zero and a multiple of number_sampling_timesteps.
-        :type rlc_initial_run_length: int
+        :type rlc_run_length: int
         :param rlc_min_samples:
             Minimum number of independent samples for convergence in run-length control with kim-convergence.
             Default is 5.
@@ -228,11 +229,11 @@ class TestDriver(SingleCrystalTestDriver):
             raise ValueError("The number of timesteps between storage of values for run-length control has to be "
                              "bigger than zero.")
 
-        if not rlc_initial_run_length > 0:
-            raise ValueError("The initial run length for run-length control has to be bigger than zero.")
+        if not rlc_run_length > 0:
+            raise ValueError("The run length for run-length control has to be bigger than zero.")
 
-        if not rlc_initial_run_length % number_sampling_timesteps == 0:
-            raise ValueError("The initial run length for run-length control has to be a multiple of the number of "
+        if not rlc_run_length % number_sampling_timesteps == 0:
+            raise ValueError("The run length for run-length control has to be a multiple of the number of "
                              "sampling timesteps.")
 
         if not rlc_min_samples > 0:
@@ -305,7 +306,7 @@ class TestDriver(SingleCrystalTestDriver):
             print(f"ABSOLUTE_ACCURACY: Sequence[Optional[float]] = [{', '.join(absolute_accuracies)}]", file=file)
 
         with open(f"{output_dir}/rlc_parameters.py", "w") as file:
-            print(f"""INITIAL_RUN_LENGTH: int = {rlc_initial_run_length}
+            print(f"""INITIAL_RUN_LENGTH: int = {rlc_run_length}
 MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", file=file)
 
         # Write lammps file.
@@ -321,7 +322,7 @@ MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", fil
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
                     species, msd_threshold_angstrom_squared_per_sampling_timesteps, number_msd_timesteps,
-                    rlc_n_every, output_dir, equilibration_plots, lammps_command, rs))
+                    rlc_run_length, rlc_n_every, output_dir, equilibration_plots, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
