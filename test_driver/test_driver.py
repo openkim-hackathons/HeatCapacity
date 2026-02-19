@@ -306,7 +306,9 @@ class TestDriver(SingleCrystalTestDriver):
             print(f"ABSOLUTE_ACCURACY: Sequence[Optional[float]] = [{', '.join(absolute_accuracies)}]", file=file)
 
         with open(f"{output_dir}/rlc_parameters.py", "w") as file:
-            print(f"""INITIAL_RUN_LENGTH: int = {rlc_run_length}
+            print(f"""from typing import Optional
+
+INITIAL_RUN_LENGTH: int = {rlc_run_length}
 MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", file=file)
 
         # Write lammps file.

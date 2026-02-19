@@ -8,7 +8,7 @@ boundary p p p
 neigh_modify delay 0 every 1 check yes one 4000
 
 # Read initial zero-temperature crystal.
-read_data output/zero_temperature_crystal.lmp
+read_data ${zero_temperature_crystal_filename}
 
 # Change to triclinic box.
 change_box all triclinic

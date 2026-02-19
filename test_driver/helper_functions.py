@@ -98,6 +98,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "timestep": timestep_ps,
         "number_sampling_timesteps": number_sampling_timesteps,
         "species": " ".join(species),
+        "zero_temperature_crystal_filename": f"{output_dir}/zero_temperature_crystal.lmp",
         "average_position_filename": f"{output_dir}/average_position_temperature_{temperature_index}.dump.*",
         "average_cell_filename": f"{output_dir}/average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
