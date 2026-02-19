@@ -18,8 +18,9 @@ class TestDriver(SingleCrystalTestDriver):
                    timestep_ps: float = 0.001, number_sampling_timesteps: int = 100,
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
-                   number_msd_timesteps: int = 10000,
-                   random_seeds: Optional[Sequence[int]] = (1, 2, 3), **kwargs) -> None:
+                   number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
+                   rlc_n_every: int = 10, rlc_initial_run_length: int = 10000, rlc_min_samples: int = 5,
+                   **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
         derivatives.
@@ -107,7 +108,7 @@ class TestDriver(SingleCrystalTestDriver):
             Number of timesteps to monitor the mean-squared displacement in Lammps.
             Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
             timesteps.
-            Default is 10000 timesteps.
+            Default is 20000 timesteps.
             Should be bigger than zero and a multiple of number_sampling_timesteps.
         :param random_seeds:
             Random seeds for the Lammps simulations.
@@ -116,6 +117,21 @@ class TestDriver(SingleCrystalTestDriver):
             If None is given, random seeds will be sampled.
             Default is (1, 2, 3).
             Each seed should be bigger than zero.
+        :param rlc_n_every:
+            Number of timesteps between storage of values for the run-length control in kim-convergence.
+            Default is 10.
+            Should be bigger than zero.
+        :type rlc_n_every: int
+        :param rlc_initial_run_length:
+            Initial run length in timesteps for run-length control with kim-convergence.
+            Default is 10000 timesteps.
+            Should be bigger than zero and a multiple of number_sampling_timesteps.
+        :type rlc_initial_run_length: int
+        :param rlc_min_samples:
+            Minimum number of independent samples for convergence in run-length control with kim-convergence.
+            Default is 5.
+            Should be bigger than zero.
+        :type rlc_min_samples: int
         :type random_seeds: Optional[Sequence[int]]
 
         :raises ValueError:
@@ -200,6 +216,21 @@ class TestDriver(SingleCrystalTestDriver):
             # Get random 31-bit unsigned integers.
             random_seeds = [random.getrandbits(31) for _ in range(2 * number_symmetric_temperature_steps + 1)]
 
+        if not rlc_n_every > 0:
+            raise ValueError("The number of timesteps between storage of values for run-length control has to be "
+                             "bigger than zero.")
+
+        if not rlc_initial_run_length > 0:
+            raise ValueError("The initial run length for run-length control has to be bigger than zero.")
+
+        if not rlc_initial_run_length % number_sampling_timesteps == 0:
+            raise ValueError("The initial run length for run-length control has to be a multiple of the number of "
+                             "sampling timesteps.")
+
+        if not rlc_min_samples > 0:
+            raise ValueError("The minimum number of samples to use for convergence checks in run-length control has to "
+                             "be bigger than zero.")
+
         # Get pressure from cauchy stress tensor.
         pressure_bar = -cell_cauchy_stress_bar[0]
 
@@ -235,11 +266,10 @@ class TestDriver(SingleCrystalTestDriver):
         if not os.path.exists("output"):
             raise KIMTestDriverError("Output directory 'output' does not exist.")
         test_driver_directory = os.path.dirname(os.path.realpath(__file__))
-        if os.getcwd() != test_driver_directory:
-            shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), "npt.lammps")
-            shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"), "run_length_control.py")
+        shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), "output/npt.lammps")
+        shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"), "output/run_length_control.py")
         # Choose the correct accuracies file for kim-convergence based on whether the cell is orthogonal or not.
-        with open("accuracies.py", "w") as file:
+        with open("output/accuracies.py", "w") as file:
             print("""from typing import Optional, Sequence
 
 # A relative half-width requirement or the accuracy parameter. Target value
@@ -265,6 +295,10 @@ class TestDriver(SingleCrystalTestDriver):
             print(f"RELATIVE_ACCURACY: Sequence[Optional[float]] = [{', '.join(relative_accuracies)}]", file=file)
             print(f"ABSOLUTE_ACCURACY: Sequence[Optional[float]] = [{', '.join(absolute_accuracies)}]", file=file)
 
+        with open("output/rlc_parameters.py", "w") as file:
+            print(f"""INITIAL_RUN_LENGTH: int = {rlc_initial_run_length}
+MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", file=file)
+
         # Write lammps file.
         structure_file = "output/zero_temperature_crystal.lmp"
         atom_style = self._get_supported_lammps_atom_style()
@@ -278,7 +312,7 @@ class TestDriver(SingleCrystalTestDriver):
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
                     species, msd_threshold_angstrom_squared_per_sampling_timesteps, number_msd_timesteps,
-                    lammps_command, rs))
+                    rlc_n_every, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):

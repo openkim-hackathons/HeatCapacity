@@ -15,7 +15,7 @@ import scipy.optimize
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
                number_sampling_timesteps: int, species: List[str],
                msd_threshold_angstrom_squared_per_sampling_timesteps: float, number_msd_timesteps: int,
-               lammps_command: str, random_seed: int) -> Tuple[str, str, str, str, str]:
+               rlc_n_every: int, lammps_command: str, random_seed: int) -> Tuple[str, str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
 
@@ -56,6 +56,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
         timesteps.
     :type number_msd_timesteps: int
+    :param rlc_n_every:
+        Number of timesteps between storage of values for the run-length control in kim-convergence.
+    :type rlc_n_every: int
     :param lammps_command:
         Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").
     :type lammps_command: str
@@ -91,6 +94,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "msd_trajectory_filename": f"output/msd_trajectory_{temperature_index}.lammpstrj",
         "msd_threshold": msd_threshold_angstrom_squared_per_sampling_timesteps,
         "msd_timesteps": number_msd_timesteps,
+        "rlc_n_every": rlc_n_every,
         "melted_crystal_output": melted_crystal_filename
     }
 
@@ -98,7 +102,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
             f"{lammps_command} "
             + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
             + f" -log {log_filename}"
-            + " -in npt.lammps")
+            + " -in output/npt.lammps")
 
     subprocess.run(command, check=True, shell=True)
 

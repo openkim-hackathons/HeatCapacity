@@ -144,8 +144,7 @@ variable lz_metal equal "v_zhi_metal - v_zlo_metal"
 fix aveCell all ave/time 1 10000 10000 v_lx_metal v_ly_metal v_lz_metal v_xy_metal v_xz_metal v_yz_metal file ${average_cell_filename}
 
 # Set up convergence check with kim-convergence.
-# python run_length_control input 8 SELF 1 variable vol_metal variable temp_metal variable enthalpy_metal format pissssss file run_length_control.py
-python run_length_control input 20 SELF 1 variable vol_metal variable temp_metal variable enthalpy_metal variable lx_metal variable ly_metal variable lz_metal variable xy_metal variable xz_metal variable yz_metal format pissssssssssssssssss file run_length_control.py
+python run_length_control input 20 SELF ${rlc_n_every} variable vol_metal variable temp_metal variable enthalpy_metal variable lx_metal variable ly_metal variable lz_metal variable xy_metal variable xz_metal variable yz_metal format pissssssssssssssssss file run_length_control.py
 
 # Run until converged.
 python run_length_control invoke

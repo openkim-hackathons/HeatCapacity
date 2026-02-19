@@ -7,9 +7,10 @@ from typing import Optional
 from lammps import lammps
 import kim_convergence as cr
 from accuracies import RELATIVE_ACCURACY, ABSOLUTE_ACCURACY
+from rlc_parameters import INITIAL_RUN_LENGTH, MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES
 
 # Initial run length
-INITIAL_RUN_LENGTH: int = 10000
+# INITIAL_RUN_LENGTH: int = 10000
 # Run length increasing factor
 RUN_LENGTH_FACTOR: float = 1.
 # The maximum run length represents a cost constraint.
@@ -20,7 +21,7 @@ MAX_RUN_LENGTH: int = 1000 * INITIAL_RUN_LENGTH
 # the maximum equilibration step.
 MAX_EQUILIBRATION_STEP: Optional[int] = 500 * INITIAL_RUN_LENGTH
 # Minimum number of independent samples.
-MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = 100
+# MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = 100
 # Probability (or confidence interval) and must be between 0.0 and 1.0, and
 # represents the confidence for calculation of relative halfwidths estimation.
 CONFIDENCE: float = 0.95
