@@ -42,26 +42,6 @@ def compute_supercell_reps_for_cutoff(cell: np.ndarray, r: float) -> Tuple[int, 
     return (n_a, n_b, n_c)
 
 
-def compute_supercell_reps_uniform_cubic(
-    n_atoms_primitive: int, target_atoms: int
-) -> Tuple[int, int, int]:
-    """Compute uniform cubic supercell repetitions to reach a target atom count.
-
-    Calculates the smallest integer `n` such that a supercell of `(n, n, n)`
-    repetitions contains at least `target_atoms`. This method assumes a cubic
-    expansion.
-
-    Args:
-        n_atoms_primitive: Number of atoms in the primitive unit cell.
-        target_atoms: The desired minimum number of atoms in the supercell.
-
-    Returns:
-        Tuple of repetitions (n, n, n) for uniform cubic expansion.
-    """
-    n = max(1, int(np.ceil(np.cbrt(target_atoms / n_atoms_primitive))))
-    return (n, n, n)
-
-
 def compute_supercell_for_target_size(
     atoms: Atoms,
     target_size: int = 10000,
