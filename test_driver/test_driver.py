@@ -11,11 +11,12 @@ from kim_tools.symmetry_util.core import (reduce_and_avg, PeriodExtensionExcepti
 from kim_tools.test_driver import SingleCrystalTestDriver
 from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
                                get_positions_from_averaged_lammps_dump, run_lammps)
+from .structure_utils import compute_supercell_for_target_size
 
 
 class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
-                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100,
+                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, target_size: int = 10000,
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
                    number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
@@ -80,10 +81,18 @@ class TestDriver(SingleCrystalTestDriver):
             Default is 100 timesteps.
             Should be bigger than zero.
         :type number_sampling_timesteps: int
+        :param target_size:
+            Target number of atoms in the supercell to build by repeating the unit cell. Uses cutoff-based expansion
+            with target size constraint (good for non-cubic cells). The algorithm starts with an 8Å cutoff radius and
+            recursively decreases it until the supercell has fewer atoms than target_size.
+            Default is 10000.
+            Should be bigger than zero.
+            Ignored if repeat is specified.
+        :type target_size: int
         :param repeat:
             Tuple of three integers specifying how often to repeat the unit cell in each direction to build the
             supercell.
-            If None, a supercell size close to 10,000 atoms is chosen.
+            If None, the repeat will be determined based on the target_size argument using a cutoff-based approach.
             Default is None.
             If not None, all entries have to be bigger than zero.
         :type repeat: Sequence[int]
@@ -191,6 +200,9 @@ class TestDriver(SingleCrystalTestDriver):
         if not number_sampling_timesteps > 0:
             raise ValueError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
 
+        if not target_size > 0:
+            raise ValueError("Target size for supercell construction has to be bigger than zero.")
+
         if repeat is not None:
             if not len(repeat) == 3:
                 raise ValueError("The repeat argument has to be a tuple of three integers.")
@@ -255,14 +267,13 @@ class TestDriver(SingleCrystalTestDriver):
         symbols = atoms_new.get_chemical_symbols()
         species = sorted(set(symbols))
 
-        # Build supercell.
-        if repeat is None:
-            # Get a size close to 10K atoms (shown to give good convergence)
-            x = int(np.ceil(np.cbrt(10000 / len(atoms_new))))
-            repeat = (x, x, x)
-
-        assert repeat is not None
-        atoms_new = atoms_new.repeat(repeat)
+        if repeat is not None:
+            # Use explicit repeat tuple.
+            atoms_new = atoms_new.repeat(repeat)
+        else:
+            # Use cutoff-based expansion with target size constraint
+            # (good for non-cubic cells, ensures natoms >= target_size)
+            atoms_new, repeat = compute_supercell_for_target_size(atoms_new.copy(), target_size)
 
         # Get temperatures that should be simulated.
         temperature_step = temperature_step_fraction * temperature_K
