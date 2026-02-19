@@ -14,8 +14,8 @@ import scipy.optimize
 
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
                number_sampling_timesteps: int, species: List[str],
-               msd_threshold_angstrom_squared_per_hundred_timesteps: float, lammps_command: str,
-               random_seed: int) -> Tuple[str, str, str, str, str]:
+               msd_threshold_angstrom_squared_per_sampling_timesteps: float, number_msd_timesteps: int,
+               lammps_command: str, random_seed: int) -> Tuple[str, str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
 
@@ -48,9 +48,14 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     :param species:
         List of chemical species in the system.
     :type species: List[str]
-    :param msd_threshold_angstrom_squared_per_hundred_timesteps:
-        Mean squared displacement threshold for vaporization in Angstroms^2 per 100*timestep.
-    :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
+    :param msd_threshold_angstrom_squared_per_sampling_timesteps:
+        Mean squared displacement threshold for vaporization in Angstroms^2 per number_sampling_timesteps.
+    :type msd_threshold_angstrom_squared_per_sampling_timesteps: float
+    :param number_msd_timesteps:
+        Number of timesteps over which to compute the mean squared displacement for vaporization detection.
+        Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
+        timesteps.
+    :type number_msd_timesteps: int
     :param lammps_command:
         Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").
     :type lammps_command: str
@@ -83,7 +88,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "average_cell_filename": f"output/average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
         "trajectory_filename": f"output/trajectory_{temperature_index}.lammpstrj",
-        "msd_threshold": msd_threshold_angstrom_squared_per_hundred_timesteps,
+        "msd_trajectory_filename": f"output/msd_trajectory_{temperature_index}.lammpstrj",
+        "msd_threshold": msd_threshold_angstrom_squared_per_sampling_timesteps,
+        "msd_timesteps": number_msd_timesteps,
         "melted_crystal_output": melted_crystal_filename
     }
 

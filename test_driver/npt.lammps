@@ -60,36 +60,43 @@ variable yz_metal equal yz/${_u_distance}
 # In metal units: 1 bar Angstrom^3 = 6.241509074460762e-7 eV
 variable enthalpy_metal equal "v_pe_metal + v_ke_metal + v_press_metal * v_vol_metal * 6.241509074460762e-7"
 
-# Write trajectory.
-dump traj all atom 10000 ${trajectory_filename}
-
 # Temperature may be off because of rigid bodies or SHAKE constraints.
 # See https://docs.lammps.org/velocity.html
 run 0
 velocity all scale $(v_temperature*v__u_temperature)
 
+# Write trajectory.
+dump msd_traj all atom 10000 ${msd_trajectory_filename}
+
 # Compute mean squared displacement 
 compute msd all msd com yes
 
 # Perform a short run to equilibrate MSD
-run 5000
-        
+run ${msd_timesteps}
+
 # Calculate slope of MSD to detect diffusion
-fix msd_vector all vector 100 c_msd[4]
+fix msd_vector all vector ${number_sampling_timesteps} c_msd[4]
 variable msd_slope equal slope(f_msd_vector)
 
 # Thermodynamic output
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
                          v_xlo_metal v_xhi_metal v_ylo_metal v_yhi_metal v_zlo_metal v_zhi_metal &
                          v_xy_metal v_xz_metal v_yz_metal v_enthalpy_metal c_msd[4] v_msd_slope
-thermo 1000
+thermo ${number_sampling_timesteps}
         
 # Perform a short run and decide whether or not to quit
-run 5000
+run ${msd_timesteps}
 if "${msd_slope} > $(v_msd_threshold*(v__u_distance^2))" then "write_dump all atom ${melted_crystal_output}" &
                                                                         "print 'Crystal melted or vaporized'" &
                                                                         "quit"
+
+# Reset.
 unfix msd_vector
+undump msd_traj
+reset_timestep 0
+
+# Write trajectory.
+dump traj all atom 10000 ${trajectory_filename}
 
 # Set up logging of thermodynamic information.
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
@@ -127,8 +134,8 @@ variable zsu atom "(c_up[3]-zlo)/(zhi-zlo)"
 fix avePos all ave/atom 1 10000 10000 v_xsu v_ysu v_zsu
 dump avePosDump all custom 10000 ${average_position_filename} id f_avePos[1] f_avePos[2] f_avePos[3]
 
-# Prevent dump at timestep 0 and 10000.
-dump_modify avePosDump delay 20000
+# Prevent dump at timestep 0.
+dump_modify avePosDump delay 10000
 
 # Average the cell information.
 variable lx_metal equal "v_xhi_metal - v_xlo_metal"

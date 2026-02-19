@@ -17,7 +17,8 @@ class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
                    timestep_ps: float = 0.001, number_sampling_timesteps: int = 100,
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
-                   lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_hundred_timesteps: float = 0.1,
+                   lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
+                   number_msd_timesteps: int = 10000,
                    random_seeds: Optional[Sequence[int]] = (1, 2, 3), **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
@@ -96,11 +97,18 @@ class TestDriver(SingleCrystalTestDriver):
             Command to run Lammps.
             Default is "lmp".
         :type lammps_command: str
-        :param msd_threshold_angstrom_squared_per_hundred_timesteps:
-            Mean-squared displacement threshold in Angstroms^2 per 100*timestep to detect melting or vaporization.
+        :param msd_threshold_angstrom_squared_per_sampling_timesteps:
+            Mean-squared displacement threshold in Angstroms^2 per number_sampling_timesteps to detect melting or
+            vaporization.
             Default is 0.1.
             Should be bigger than zero.
-        :type msd_threshold_angstrom_squared_per_hundred_timesteps: float
+        :type msd_threshold_angstrom_squared_per_sampling_timesteps: float
+        :param number_msd_timesteps:
+            Number of timesteps to monitor the mean-squared displacement in Lammps.
+            Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
+            timesteps.
+            Default is 10000 timesteps.
+            Should be bigger than zero and a multiple of number_sampling_timesteps.
         :param random_seeds:
             Random seeds for the Lammps simulations.
             This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
@@ -171,8 +179,16 @@ class TestDriver(SingleCrystalTestDriver):
         else:
             max_workers = 1
         
-        if not msd_threshold_angstrom_squared_per_hundred_timesteps > 0.0:
+        if not msd_threshold_angstrom_squared_per_sampling_timesteps > 0.0:
             raise ValueError("The mean-squared displacement threshold has to be bigger than zero.")
+
+        if not number_msd_timesteps > 0:
+            raise ValueError("The number of timesteps to monitor the mean-squared displacement has to be bigger than "
+                             "zero.")
+
+        if not number_msd_timesteps % number_sampling_timesteps == 0:
+            raise ValueError("The number of timesteps to monitor the mean-squared displacement has to be a multiple of "
+                             "the number of sampling timesteps.")
 
         if random_seeds is not None:
             if len(random_seeds) != 2 * number_symmetric_temperature_steps + 1:
@@ -261,7 +277,8 @@ class TestDriver(SingleCrystalTestDriver):
             for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
-                    species, msd_threshold_angstrom_squared_per_hundred_timesteps, lammps_command, rs))
+                    species, msd_threshold_angstrom_squared_per_sampling_timesteps, number_msd_timesteps,
+                    lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
