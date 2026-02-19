@@ -15,7 +15,8 @@ import scipy.optimize
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
                number_sampling_timesteps: int, species: List[str],
                msd_threshold_angstrom_squared_per_sampling_timesteps: float, number_msd_timesteps: int,
-               rlc_n_every: int, lammps_command: str, random_seed: int) -> Tuple[str, str, str, str, str]:
+               rlc_n_every: int, output_dir: str, equilibration_plots: bool, lammps_command: str,
+               random_seed: int) -> Tuple[str, str, str, str, str]:
     """
     Run LAMMPS NPT simulation with the given parameters.
 
@@ -59,6 +60,12 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     :param rlc_n_every:
         Number of timesteps between storage of values for the run-length control in kim-convergence.
     :type rlc_n_every: int
+    :param output_dir:
+        Directory to store the output files.
+    :type output_dir: str
+    :param equilibration_plots:
+        Whether to plot the equilibration plots.
+    :type equilibration_plots: bool
     :param lammps_command:
         Command to run LAMMPS (e.g., "mpirun -np 4 lmp_mpi" or "lmp").
     :type lammps_command: str
@@ -74,9 +81,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     pdamp = timestep_ps * 100.0
     tdamp = timestep_ps * 1000.0
 
-    log_filename = f"output/lammps_temperature_{temperature_index}.log"
-    restart_filename = f"output/final_configuration_temperature_{temperature_index}.restart"
-    melted_crystal_filename = f"output/melted_crystal_temperature_{temperature_index}.dump"
+    log_filename = f"{output_dir}/lammps_temperature_{temperature_index}.log"
+    restart_filename = f"{output_dir}/final_configuration_temperature_{temperature_index}.restart"
+    melted_crystal_filename = f"{output_dir}/melted_crystal_temperature_{temperature_index}.dump"
     variables = {
         "modelname": modelname,
         "temperature": temperature_K,
@@ -87,11 +94,11 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "timestep": timestep_ps,
         "number_sampling_timesteps": number_sampling_timesteps,
         "species": " ".join(species),
-        "average_position_filename": f"output/average_position_temperature_{temperature_index}.dump.*",
-        "average_cell_filename": f"output/average_cell_temperature_{temperature_index}.dump",
+        "average_position_filename": f"{output_dir}/average_position_temperature_{temperature_index}.dump.*",
+        "average_cell_filename": f"{output_dir}/average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
-        "trajectory_filename": f"output/trajectory_{temperature_index}.lammpstrj",
-        "msd_trajectory_filename": f"output/msd_trajectory_{temperature_index}.lammpstrj",
+        "trajectory_filename": f"{output_dir}/trajectory_{temperature_index}.lammpstrj",
+        "msd_trajectory_filename": f"{output_dir}/msd_trajectory_{temperature_index}.lammpstrj",
         "msd_threshold": msd_threshold_angstrom_squared_per_sampling_timesteps,
         "msd_timesteps": number_msd_timesteps,
         "rlc_n_every": rlc_n_every,
@@ -102,24 +109,25 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
             f"{lammps_command} "
             + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
             + f" -log {log_filename}"
-            + " -in output/npt.lammps")
+            + f" -in {output_dir}/npt.lammps")
 
     subprocess.run(command, check=True, shell=True)
 
-    plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
+    if equilibration_plots:
+        plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
 
     # 10000 offset from MSD detection during which kim_convergence was not used.
     equilibration_time = extract_equilibration_step_from_logfile(log_filename) + 10000
     # Round to next multiple of 10000.
     equilibration_time = int(ceil(equilibration_time / 10000.0)) * 10000
 
-    full_average_position_file = f"output/average_position_temperature_{temperature_index}.dump.full"
-    compute_average_positions_from_lammps_dump("output",
+    full_average_position_file = f"{output_dir}/average_position_temperature_{temperature_index}.dump.full"
+    compute_average_positions_from_lammps_dump(output_dir,
                                                f"average_position_temperature_{temperature_index}.dump",
                                                full_average_position_file, equilibration_time)
 
-    full_average_cell_file = f"output/average_cell_temperature_{temperature_index}.dump.full"
-    compute_average_cell_from_lammps_dump(f"output/average_cell_temperature_{temperature_index}.dump",
+    full_average_cell_file = f"{output_dir}/average_cell_temperature_{temperature_index}.dump.full"
+    compute_average_cell_from_lammps_dump(f"{output_dir}/average_cell_temperature_{temperature_index}.dump",
                                           full_average_cell_file, equilibration_time)
 
     return log_filename, restart_filename, full_average_position_file, full_average_cell_file, melted_crystal_filename

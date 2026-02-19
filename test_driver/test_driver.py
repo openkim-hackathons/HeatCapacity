@@ -7,7 +7,7 @@ from ase.calculators.lammps import convert, Prism
 import numpy as np
 from kim_tools import get_stoich_reduced_list_from_prototype, KIMTestDriverError
 from kim_tools.symmetry_util.core import (reduce_and_avg, PeriodExtensionException,
-                                           fit_voigt_tensor_to_cell_and_space_group,)
+                                          fit_voigt_tensor_to_cell_and_space_group)
 from kim_tools.test_driver import SingleCrystalTestDriver
 from .helper_functions import (compute_alpha_tensor, compute_heat_capacity, get_cell_from_averaged_lammps_dump,
                                get_positions_from_averaged_lammps_dump, run_lammps)
@@ -20,7 +20,7 @@ class TestDriver(SingleCrystalTestDriver):
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
                    number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
                    rlc_n_every: int = 10, rlc_initial_run_length: int = 10000, rlc_min_samples: int = 5,
-                   **kwargs) -> None:
+                   output_dir: str = "output", equilibration_plots: bool = True, **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
         derivatives.
@@ -50,7 +50,7 @@ class TestDriver(SingleCrystalTestDriver):
         vaporization during short initial simulations. During these initial runs, the mean-squared displacement (MSD) of
         atoms during the simulations is monitored. If the MSD exceeds a given threshold value, an error is raised.
 
-        All output files are written to the "output" directory.
+        All output files are written to the given output directory.
 
         :param temperature_step_fraction:
             Fraction of the target temperature that is used as temperature step for the finite-difference scheme.
@@ -117,6 +117,7 @@ class TestDriver(SingleCrystalTestDriver):
             If None is given, random seeds will be sampled.
             Default is (1, 2, 3).
             Each seed should be bigger than zero.
+        :type random_seeds: Optional[Sequence[int]]
         :param rlc_n_every:
             Number of timesteps between storage of values for the run-length control in kim-convergence.
             Default is 10.
@@ -132,14 +133,21 @@ class TestDriver(SingleCrystalTestDriver):
             Default is 5.
             Should be bigger than zero.
         :type rlc_min_samples: int
-        :type random_seeds: Optional[Sequence[int]]
+        :param output_dir:
+            Directory to which all output files will be written.
+            Default is "output".
+        :type output_dir: str
+        :param equilibration_plots:
+            Whether to generate diagnostic plots for the equilibration checks in kim-convergence.
+            Default is True.
+        :type equilibration_plots: bool
 
         :raises ValueError:
             If any of the input arguments are invalid.
         :raises KIMTestDriverError:
             If the crystal melts or vaporizes during the simulation.
             If the symmetry of the structure changes.
-            If the output directory "output" does not exist.
+            If the output directory does not exist.
         """
         # Set prototype label.
         self.prototype_label = self._get_nominal_crystal_structure_npt()["prototype-label"]["source-value"]
@@ -263,13 +271,14 @@ class TestDriver(SingleCrystalTestDriver):
         assert all(t > 0.0 for t in temperatures)
 
         # Make sure output directory for all data files exists and copy over necessary files.
-        if not os.path.exists("output"):
-            raise KIMTestDriverError("Output directory 'output' does not exist.")
+        if not os.path.exists(output_dir):
+            raise KIMTestDriverError(f"Output directory '{output_dir}' does not exist.")
         test_driver_directory = os.path.dirname(os.path.realpath(__file__))
-        shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), "output/npt.lammps")
-        shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"), "output/run_length_control.py")
+        shutil.copyfile(os.path.join(test_driver_directory, "npt.lammps"), f"{output_dir}/npt.lammps")
+        shutil.copyfile(os.path.join(test_driver_directory, "run_length_control.py"),
+                        f"{output_dir}/run_length_control.py")
         # Choose the correct accuracies file for kim-convergence based on whether the cell is orthogonal or not.
-        with open("output/accuracies.py", "w") as file:
+        with open(f"{output_dir}/accuracies.py", "w") as file:
             print("""from typing import Optional, Sequence
 
 # A relative half-width requirement or the accuracy parameter. Target value
@@ -295,12 +304,12 @@ class TestDriver(SingleCrystalTestDriver):
             print(f"RELATIVE_ACCURACY: Sequence[Optional[float]] = [{', '.join(relative_accuracies)}]", file=file)
             print(f"ABSOLUTE_ACCURACY: Sequence[Optional[float]] = [{', '.join(absolute_accuracies)}]", file=file)
 
-        with open("output/rlc_parameters.py", "w") as file:
+        with open(f"{output_dir}/rlc_parameters.py", "w") as file:
             print(f"""INITIAL_RUN_LENGTH: int = {rlc_initial_run_length}
 MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", file=file)
 
         # Write lammps file.
-        structure_file = "output/zero_temperature_crystal.lmp"
+        structure_file = f"{output_dir}/zero_temperature_crystal.lmp"
         atom_style = self._get_supported_lammps_atom_style()
         atoms_new.write(structure_file, format="lammps-data", masses=True, units="metal", atom_style=atom_style)
 
@@ -312,7 +321,7 @@ MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", fil
                 futures.append(executor.submit(
                     run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
                     species, msd_threshold_angstrom_squared_per_sampling_timesteps, number_msd_timesteps,
-                    rlc_n_every, lammps_command, rs))
+                    rlc_n_every, output_dir, equilibration_plots, lammps_command, rs))
 
         # If one simulation fails, cancel all runs.
         for future in as_completed(futures):
@@ -350,7 +359,7 @@ MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", fil
             try:
                 reduced_atoms = reduce_and_avg(atoms_new, repeat)
             except PeriodExtensionException as e:
-                atoms_new.write(f"output/final_configuration_temperature_{t_index}_failing.poscar",
+                atoms_new.write(f"{output_dir}/final_configuration_temperature_{t_index}_failing.poscar",
                                 format="vasp", sort=True)
                 raise KIMTestDriverError(f"Could not reduce structure after NPT simulation at "
                                          f"temperature {t} K (temperature index {t_index}): {e}")
@@ -363,7 +372,7 @@ MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", fil
             
             # Check that the symmetry of the structure did not change.
             if not self._verify_unchanged_symmetry(reduced_atoms):
-                reduced_atoms.write(f"output/reduced_atoms_temperature_{t_index}_failing.poscar",
+                reduced_atoms.write(f"{output_dir}/reduced_atoms_temperature_{t_index}_failing.poscar",
                                     format="vasp", sort=True)
                 raise KIMTestDriverError(f"Symmetry of structure changed during simulation at temperature {t} K.")
             
