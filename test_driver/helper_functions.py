@@ -124,10 +124,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         plot_property_from_lammps_log(f"{output_dir}/{log_filename}",
                                       ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
 
-    # 10000 offset from MSD detection during which kim_convergence was not used.
-    equilibration_time = extract_equilibration_step_from_logfile(log_filename) + 10000
-    # Round to next multiple of 10000.
-    equilibration_time = int(ceil(equilibration_time / 10000.0)) * 10000
+    equilibration_time = extract_equilibration_step_from_logfile(f"{output_dir}/{log_filename}")
+    # Round to next multiple of rlc_run_length.
+    equilibration_time = int(ceil(equilibration_time / float(rlc_run_length))) * rlc_run_length
 
     full_average_position_file = f"{output_dir}/average_position_temperature_{temperature_index}.dump.full"
     compute_average_positions_from_lammps_dump(output_dir,
