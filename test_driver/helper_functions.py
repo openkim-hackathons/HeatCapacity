@@ -85,9 +85,10 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     pdamp = timestep_ps * 100.0
     tdamp = timestep_ps * 1000.0
 
-    log_filename = f"{output_dir}/lammps_temperature_{temperature_index}.log"
-    restart_filename = f"{output_dir}/final_configuration_temperature_{temperature_index}.restart"
-    melted_crystal_filename = f"{output_dir}/melted_crystal_temperature_{temperature_index}.dump"
+    # Lammps will be run directly in output_dir so all paths are with respect to that directory.
+    log_filename = f"lammps_temperature_{temperature_index}.log"
+    restart_filename = f"final_configuration_temperature_{temperature_index}.restart"
+    melted_crystal_filename = f"melted_crystal_temperature_{temperature_index}.dump"
     variables = {
         "modelname": modelname,
         "temperature": temperature_K,
@@ -98,12 +99,12 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "timestep": timestep_ps,
         "number_sampling_timesteps": number_sampling_timesteps,
         "species": " ".join(species),
-        "zero_temperature_crystal_filename": f"{output_dir}/zero_temperature_crystal.lmp",
-        "average_position_filename": f"{output_dir}/average_position_temperature_{temperature_index}.dump.*",
-        "average_cell_filename": f"{output_dir}/average_cell_temperature_{temperature_index}.dump",
+        "zero_temperature_crystal_filename": f"zero_temperature_crystal.lmp",
+        "average_position_filename": f"average_position_temperature_{temperature_index}.dump.*",
+        "average_cell_filename": f"average_cell_temperature_{temperature_index}.dump",
         "write_restart_filename": restart_filename,
-        "trajectory_filename": f"{output_dir}/trajectory_{temperature_index}.lammpstrj",
-        "msd_trajectory_filename": f"{output_dir}/msd_trajectory_{temperature_index}.lammpstrj",
+        "trajectory_filename": f"trajectory_{temperature_index}.lammpstrj",
+        "msd_trajectory_filename": f"msd_trajectory_{temperature_index}.lammpstrj",
         "msd_threshold": msd_threshold_angstrom_squared_per_sampling_timesteps,
         "msd_timesteps": number_msd_timesteps,
         "rlc_run_length": rlc_run_length,
@@ -115,9 +116,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
             f"{lammps_command} "
             + " ".join(f"-var {key} '{item}'" for key, item in variables.items())
             + f" -log {log_filename}"
-            + f" -in {output_dir}/npt.lammps")
+            + f" -in npt.lammps")
 
-    subprocess.run(command, check=True, shell=True)
+    subprocess.run(command, check=True, shell=True, cwd=output_dir)
 
     if equilibration_plots:
         plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
@@ -136,7 +137,8 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     compute_average_cell_from_lammps_dump(f"{output_dir}/average_cell_temperature_{temperature_index}.dump",
                                           full_average_cell_file, equilibration_time)
 
-    return log_filename, restart_filename, full_average_position_file, full_average_cell_file, melted_crystal_filename
+    return (f"{output_dir}/{log_filename}", f"{output_dir}/{restart_filename}", full_average_position_file,
+            full_average_cell_file, f"{output_dir}/{melted_crystal_filename}")
 
 
 def plot_property_from_lammps_log(in_file_path: str, property_names: Iterable[str]) -> None:

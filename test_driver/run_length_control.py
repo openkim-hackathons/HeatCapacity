@@ -1,13 +1,12 @@
 """Run length control for LAMMPS."""
-import sys
-import os
-sys.path.append(os.getcwd())
 import numpy as np
 from typing import Optional
 from lammps import lammps
 import kim_convergence as cr
+# These python files are created dynamically in test_driver.py.
 from accuracies import RELATIVE_ACCURACY, ABSOLUTE_ACCURACY
 from rlc_parameters import INITIAL_RUN_LENGTH, MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES
+
 
 # Initial run length
 # INITIAL_RUN_LENGTH: int = 10000
