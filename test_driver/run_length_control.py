@@ -1,4 +1,7 @@
 """Run length control for LAMMPS."""
+import sys
+import os
+sys.path.append(os.getcwd())
 import numpy as np
 from typing import Optional
 from lammps import lammps
