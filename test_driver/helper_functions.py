@@ -121,7 +121,8 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     subprocess.run(command, check=True, shell=True, cwd=output_dir)
 
     if equilibration_plots:
-        plot_property_from_lammps_log(log_filename, ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
+        plot_property_from_lammps_log(f"{output_dir}/{log_filename}",
+                                      ("v_vol_metal", "v_temp_metal", "v_enthalpy_metal"))
 
     # 10000 offset from MSD detection during which kim_convergence was not used.
     equilibration_time = extract_equilibration_step_from_logfile(log_filename) + 10000
