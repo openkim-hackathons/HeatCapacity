@@ -83,7 +83,7 @@ class TestDriver(SingleCrystalTestDriver):
         :type number_sampling_timesteps: int
         :param target_size:
             Target number of atoms in the supercell to build by repeating the unit cell. Uses cutoff-based expansion
-            with target size constraint (good for non-cubic cells). The algorithm starts with an 8Å cutoff radius and
+            with target size constraint (good for non-cubic cells). The algorithm starts with an 20Å cutoff radius and
             recursively decreases it until the supercell has fewer atoms than target_size.
             Default is 10000.
             Should be bigger than zero.

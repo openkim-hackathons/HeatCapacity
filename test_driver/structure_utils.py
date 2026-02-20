@@ -65,7 +65,7 @@ def compute_supercell_for_target_size(
         target_size: Maximum number of atoms in the supercell. Default: 10000.
         current_radius: Starting cutoff radius in Å. Default: 20.0.
         previous_radius: Cutoff radius in Å of the previous iteration. Optional. Default: None.
-        radius_step: Amount to decrease radius by in each iteration (Å). Default: 0.5.
+        radius_step: Amount to decrease radius by in each iteration (Å). Default: 0.1.
         min_radius: Minimum radius to try before giving up (Å). Default: 1.0.
 
     Returns:
