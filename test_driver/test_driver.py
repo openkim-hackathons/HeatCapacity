@@ -40,7 +40,7 @@ class TestDriver(SingleCrystalTestDriver):
         runs molecular-dynamics simulations in the NPT ensemble using Lammps.
 
         This test driver uses kim_convergence to detect equilibrated molecular-dynamics simulations. It checks for the
-        convergence of the volume, temperature, enthalpy and cell shape parameters every 10000 timesteps.
+        convergence of the volume, temperature, enthalpy and cell shape parameters every rlc_run_length timesteps.
 
         After the molecular-dynamics simulations, the symmetry of the average structures during the equilbrated parts of
         the runs are checked to ensure that they did not change in comparison to the initial structure. Also, it is
