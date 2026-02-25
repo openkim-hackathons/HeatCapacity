@@ -20,7 +20,7 @@ class TestDriver(SingleCrystalTestDriver):
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
                    number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
-                   rlc_n_every: int = 10, rlc_run_length: int = 10000, rlc_min_samples: int = 5,
+                   rlc_n_every: int = 10, rlc_run_length: int = 10000, rlc_min_samples: int = 100,
                    output_dir: str = "output", equilibration_plots: bool = True, **kwargs) -> None:
         """
         Estimate constant-pressure heat capacity and linear thermal expansion tensor with finite-difference numerical
@@ -140,7 +140,7 @@ class TestDriver(SingleCrystalTestDriver):
         :type rlc_run_length: int
         :param rlc_min_samples:
             Minimum number of independent samples for convergence in run-length control with kim-convergence.
-            Default is 5.
+            Default is 100.
             Should be bigger than zero.
         :type rlc_min_samples: int
         :param output_dir:
