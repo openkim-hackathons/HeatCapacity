@@ -13,7 +13,7 @@ import scipy.optimize
 
 
 def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pressure_bar: float, timestep_ps: float,
-               number_sampling_timesteps: int, species: List[str],
+               thermo_sampling_period: int, species: List[str],
                msd_threshold_angstrom_squared_per_sampling_timesteps: float, number_msd_timesteps: int,
                rlc_run_length: int, rlc_n_every: int, output_dir: str, equilibration_plots: bool, lammps_command: str,
                random_seed: int) -> Tuple[str, str, str, str, str]:
@@ -43,9 +43,9 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
     :param timestep_ps:
         Timestep in picoseconds.
     :type timestep_ps: float
-    :param number_sampling_timesteps:
+    :param thermo_sampling_period:
         Number of timesteps for sampling thermodynamic quantities.
-    :type number_sampling_timesteps: int
+    :type thermo_sampling_period: int
     :param species:
         List of chemical species in the system.
     :type species: List[str]
@@ -97,7 +97,7 @@ def run_lammps(modelname: str, temperature_index: int, temperature_K: float, pre
         "pressure": pressure_bar,
         "pressure_damping": pdamp,
         "timestep": timestep_ps,
-        "number_sampling_timesteps": number_sampling_timesteps,
+        "thermo_sampling_period": thermo_sampling_period,
         "species": " ".join(species),
         "zero_temperature_crystal_filename": f"zero_temperature_crystal.lmp",
         "average_position_filename": f"average_position_temperature_{temperature_index}.dump.*",

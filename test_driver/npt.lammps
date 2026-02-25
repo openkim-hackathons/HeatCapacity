@@ -75,14 +75,14 @@ compute msd all msd com yes
 run ${msd_timesteps}
 
 # Calculate slope of MSD to detect diffusion
-fix msd_vector all vector ${number_sampling_timesteps} c_msd[4]
+fix msd_vector all vector ${thermo_sampling_period} c_msd[4]
 variable msd_slope equal slope(f_msd_vector)
 
 # Thermodynamic output
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
                          v_xlo_metal v_xhi_metal v_ylo_metal v_yhi_metal v_zlo_metal v_zhi_metal &
                          v_xy_metal v_xz_metal v_yz_metal v_enthalpy_metal c_msd[4] v_msd_slope
-thermo ${number_sampling_timesteps}
+thermo ${thermo_sampling_period}
         
 # Perform a short run and decide whether or not to quit
 run ${msd_timesteps}
@@ -102,7 +102,7 @@ dump traj all atom ${rlc_run_length} ${trajectory_filename}
 thermo_style custom step v_pe_metal v_ke_metal v_temp_metal v_press_metal v_vol_metal &
                          v_xlo_metal v_xhi_metal v_ylo_metal v_yhi_metal v_zlo_metal v_zhi_metal &
                          v_xy_metal v_xz_metal v_yz_metal v_enthalpy_metal
-thermo ${number_sampling_timesteps}
+thermo ${thermo_sampling_period}
 
 # Store unwrapped coordinates for every atom. 
 # Note that Lammps cannot store scaled unwrapped coordinates (it can only dump them).

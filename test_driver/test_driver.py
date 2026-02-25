@@ -16,7 +16,7 @@ from .structure_utils import compute_supercell_for_target_size
 
 class TestDriver(SingleCrystalTestDriver):
     def _calculate(self, temperature_step_fraction: float = 0.01, number_symmetric_temperature_steps: int = 1,
-                   timestep_ps: float = 0.001, number_sampling_timesteps: int = 100, target_size: int = 10000,
+                   timestep_ps: float = 0.001, thermo_sampling_period: int = 100, target_size: int = 10000,
                    repeat: Optional[Sequence[int]] = None, max_workers: Optional[int] = None,
                    lammps_command: str = "lmp", msd_threshold_angstrom_squared_per_sampling_timesteps: float = 0.1,
                    number_msd_timesteps: int = 20000, random_seeds: Optional[Sequence[int]] = (1, 2, 3),
@@ -76,11 +76,11 @@ class TestDriver(SingleCrystalTestDriver):
             Default is 0.001 ps (1 fs).
             Should be bigger than zero.
         :type timestep_ps: float
-        :param number_sampling_timesteps:
-            Sample thermodynamic variables every number_sampling_timesteps timesteps in Lammps.
+        :param thermo_sampling_period:
+            Sample thermodynamic variables every thermo_sampling_period timesteps in Lammps.
             Default is 100 timesteps.
             Should be bigger than zero.
-        :type number_sampling_timesteps: int
+        :type thermo_sampling_period: int
         :param target_size:
             Target number of atoms in the supercell to build by repeating the unit cell. Uses cutoff-based expansion
             with target size constraint (good for non-cubic cells). The algorithm starts with an 20Å cutoff radius and
@@ -108,7 +108,7 @@ class TestDriver(SingleCrystalTestDriver):
             Default is "lmp".
         :type lammps_command: str
         :param msd_threshold_angstrom_squared_per_sampling_timesteps:
-            Mean-squared displacement threshold in Angstroms^2 per number_sampling_timesteps to detect melting or
+            Mean-squared displacement threshold in Angstroms^2 per thermo_sampling_period to detect melting or
             vaporization.
             Default is 0.1.
             Should be bigger than zero.
@@ -118,7 +118,7 @@ class TestDriver(SingleCrystalTestDriver):
             Before the mean-squared displacement is monitored, the system will be equilibrated for the same number of
             timesteps.
             Default is 20000 timesteps.
-            Should be bigger than zero and a multiple of number_sampling_timesteps.
+            Should be bigger than zero and a multiple of thermo_sampling_period.
         :param random_seeds:
             Random seeds for the Lammps simulations.
             This has to be a sequence of 2 * number_symmetric_temperature_steps + 1 integers for the different
@@ -136,7 +136,7 @@ class TestDriver(SingleCrystalTestDriver):
             Run length in timesteps for run-length control with kim-convergence.
             This will also be the timestep interval in generated trajectory files.
             Default is 10000 timesteps.
-            Should be bigger than zero and a multiple of number_sampling_timesteps.
+            Should be bigger than zero and a multiple of thermo_sampling_period.
         :type rlc_run_length: int
         :param rlc_min_samples:
             Minimum number of independent samples for convergence in run-length control with kim-convergence.
@@ -197,7 +197,7 @@ class TestDriver(SingleCrystalTestDriver):
                 "The given number of symmetric temperature steps and the given temperature-step fraction "
                 "would yield zero or negative temperatures.")
 
-        if not number_sampling_timesteps > 0:
+        if not thermo_sampling_period > 0:
             raise ValueError("Number of timesteps between sampling in Lammps has to be bigger than zero.")
 
         if not target_size > 0:
@@ -223,9 +223,9 @@ class TestDriver(SingleCrystalTestDriver):
             raise ValueError("The number of timesteps to monitor the mean-squared displacement has to be bigger than "
                              "zero.")
 
-        if not number_msd_timesteps % number_sampling_timesteps == 0:
+        if not number_msd_timesteps % thermo_sampling_period == 0:
             raise ValueError("The number of timesteps to monitor the mean-squared displacement has to be a multiple of "
-                             "the number of sampling timesteps.")
+                             "the thermo sampling period.")
 
         if random_seeds is not None:
             if len(random_seeds) != 2 * number_symmetric_temperature_steps + 1:
@@ -244,9 +244,9 @@ class TestDriver(SingleCrystalTestDriver):
         if not rlc_run_length > 0:
             raise ValueError("The run length for run-length control has to be bigger than zero.")
 
-        if not rlc_run_length % number_sampling_timesteps == 0:
-            raise ValueError("The run length for run-length control has to be a multiple of the number of "
-                             "sampling timesteps.")
+        if not rlc_run_length % thermo_sampling_period == 0:
+            raise ValueError("The run length for run-length control has to be a multiple of the number of the thermo"
+                             "sampling period.")
 
         if not rlc_min_samples > 0:
             raise ValueError("The minimum number of samples to use for convergence checks in run-length control has to "
@@ -333,7 +333,7 @@ MINIMUM_NUMBER_OF_INDEPENDENT_SAMPLES: Optional[int] = {rlc_min_samples}""", fil
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             for i, (t, rs) in enumerate(zip(temperatures, random_seeds)):
                 futures.append(executor.submit(
-                    run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, number_sampling_timesteps,
+                    run_lammps, self.kim_model_name, i, t, pressure_bar, timestep_ps, thermo_sampling_period,
                     species, msd_threshold_angstrom_squared_per_sampling_timesteps, number_msd_timesteps,
                     rlc_run_length, rlc_n_every, output_dir, equilibration_plots, lammps_command, rs))
 
